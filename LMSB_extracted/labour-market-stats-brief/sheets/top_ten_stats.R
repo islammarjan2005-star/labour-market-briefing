@@ -13,30 +13,88 @@ dir_word <- function(x) {
 
 # format number rounded to nearest 1,000
 fmt_int_1k <- function(x) {
-  if (is.na(x)) return("—")
+  if (is.na(x)) return("\u2014")
   format(round(abs(x), -3), big.mark = ",")
 }
 
 # format flash change (rounded to nearest 1,000)
 fmt_flash_change <- function(x) {
-  if (is.na(x)) return("—")
+  if (is.na(x)) return("\u2014")
   full_val <- round(x * 1000, -3)
   format(abs(full_val), big.mark = ",")
+}
+
+# format rate (NA-safe wrapper for format(round(x,1)))
+fmt_rate <- function(x) {
+  if (is.na(x)) return("\u2014")
+  format(round(x, 1), nsmall = 1)
 }
 
 # generate top ten stats
 
 generate_top_ten <- function() {
-  
+
+  # safe variable accessor — returns default if variable doesn't exist or is NULL
+  sv <- function(name, default = NA_real_) {
+    if (exists(name, inherits = TRUE)) {
+      val <- get(name, inherits = TRUE)
+      if (is.null(val)) default else val
+    } else default
+  }
+
+  # pull all needed variables safely
+  wages_total_public <- sv("wages_total_public")
+  wages_total_private <- sv("wages_total_private")
+  wages_reg_public <- sv("wages_reg_public")
+  wages_reg_private <- sv("wages_reg_private")
+  latest_wages <- sv("latest_wages")
+  latest_regular_cash <- sv("latest_regular_cash")
+  latest_wages_cpi <- sv("latest_wages_cpi")
+  latest_regular_cpi <- sv("latest_regular_cpi")
+  wages_cpi_total_vs_dec2007 <- sv("wages_cpi_total_vs_dec2007")
+  wages_cpi_total_vs_pandemic <- sv("wages_cpi_total_vs_pandemic")
+  wages_total_qchange <- sv("wages_total_qchange")
+  wages_reg_qchange <- sv("wages_reg_qchange")
+  emp_rt_cur <- sv("emp_rt_cur")
+  emp_rt_dy <- sv("emp_rt_dy")
+  emp_rt_dq <- sv("emp_rt_dq")
+  emp_rt_dc <- sv("emp_rt_dc")
+  inact_rt_cur <- sv("inact_rt_cur")
+  inact_rt_dy <- sv("inact_rt_dy")
+  inact_rt_dq <- sv("inact_rt_dq")
+  inact_rt_dc <- sv("inact_rt_dc")
+  unemp_rt_cur <- sv("unemp_rt_cur")
+  unemp_rt_dy <- sv("unemp_rt_dy")
+  unemp_rt_dq <- sv("unemp_rt_dq")
+  unemp_rt_dc <- sv("unemp_rt_dc")
+  payroll_flash_de <- sv("payroll_flash_de")
+  payroll_flash_dy <- sv("payroll_flash_dy")
+  payroll_flash_dm <- sv("payroll_flash_dm")
+  payroll_flash_cur <- sv("payroll_flash_cur")
+  payroll_flash_label <- sv("payroll_flash_label", "")
+  hosp_dy <- sv("hosp_dy")
+  retail_dy <- sv("retail_dy")
+  health_dy <- sv("health_dy")
+  days_lost_cur <- sv("days_lost_cur")
+  vac_dy <- sv("vac_dy")
+  vac_cur <- sv("vac_cur")
+  vac_dc <- sv("vac_dc")
+  redund_dq <- sv("redund_dq")
+  redund_dy <- sv("redund_dy")
+  redund_cur <- sv("redund_cur")
+  hr1_cur <- sv("hr1_cur")
+  hr1_month_label <- sv("hr1_month_label", "")
+  lfs_period_label <- sv("lfs_period_label", "")
+
   # calculate public/private dif
   pub_priv_diff_total <- if (!is.na(wages_total_public) && !is.na(wages_total_private)) {
     wages_total_public - wages_total_private
   } else NA_real_
-  
+
   pub_priv_diff_reg <- if (!is.na(wages_reg_public) && !is.na(wages_reg_private)) {
     wages_reg_public - wages_reg_private
   } else NA_real_
-  
+
   #  direction words
   pub_priv_dir <- ifelse(!is.na(pub_priv_diff_reg) && pub_priv_diff_reg >= 0, "higher", "lower")
   wages_cpi_total_dir <- ifelse(!is.na(latest_wages_cpi) && latest_wages_cpi >= 0, "grew by", "fell by")
@@ -46,7 +104,7 @@ generate_top_ten <- function() {
   emp_rt_covid_dir <- ifelse(!is.na(emp_rt_dc) && emp_rt_dc >= 0, "higher", "lower")
   inact_rt_covid_dir <- ifelse(!is.na(inact_rt_dc) && inact_rt_dc >= 0, "higher", "lower")
   unemp_rt_covid_dir <- ifelse(!is.na(unemp_rt_dc) && unemp_rt_dc >= 0, "higher", "lower")
-  
+
   # line 1: wages nominal
   line1 <- glue(
     'Annual growth in employees\' average earnings was {fmt_pct(latest_wages)} for total pay ',
@@ -58,7 +116,7 @@ generate_top_ten <- function() {
     'and a quarterly {ifelse(is.na(wages_reg_qchange) || wages_reg_qchange >= 0, "increase", "decline")} of {fmt_one_dec(abs(wages_reg_qchange))}pp respectively.',
     .comment = ""
   )
-  
+
   # line 2: wages cpi
   line2 <- glue(
     'Adjusted for CPI inflation, total and regular pay in {lfs_period_label} {wages_cpi_total_dir} ',
@@ -68,22 +126,22 @@ generate_top_ten <- function() {
     'before the pandemic (2019 average).',
     .comment = ""
   )
-  
+
   # line 3: employment rate
   line3 <- glue(
-    'The 16-64 employment rate was {format(round(emp_rt_cur, 1), nsmall = 1)}% in ',
+    'The 16-64 employment rate was {fmt_rate(emp_rt_cur)}% in ',
     '{lfs_period_label}, which is {fmt_dir(emp_rt_dy, "up", "down")} ',
     '{fmt_pp(emp_rt_dy)} from a year ago and {fmt_dir(emp_rt_dq, "up", "down")} ',
     '{fmt_pp(emp_rt_dq)} on the last quarter. The employment rate is ',
     '{fmt_pp(emp_rt_dc)} {emp_rt_covid_dir} than before the pandemic.',
     .comment = ""
   )
-  
+
   # line 4: payroll flash
   flash_de_dir <- if (!is.na(payroll_flash_de) && payroll_flash_de < 0) "a fall of around" else "a rise of around"
   flash_dy_dir <- if (!is.na(payroll_flash_dy) && payroll_flash_dy < 0) "a fall of" else "a rise of"
   flash_dm_dir <- if (!is.na(payroll_flash_dm) && payroll_flash_dm < 0) "a fall of" else "a rise of"
-  
+
   # sector direction helpers
   hosp_dy_dir <- if (!is.na(hosp_dy) && hosp_dy < 0) "a fall of" else if (!is.na(hosp_dy) && hosp_dy > 0) "a rise of" else "no change of"
   retail_dy_dir <- if (!is.na(retail_dy) && retail_dy < 0) "a fall of" else if (!is.na(retail_dy) && retail_dy > 0) "a rise of" else "no change of"
@@ -91,7 +149,7 @@ generate_top_ten <- function() {
 
   line4 <- glue(
     'Early "flash" estimates for {payroll_flash_label} indicate that ',
-    'there were {format(round(payroll_flash_cur, 1), nsmall = 1)}M payrolled employees. ',
+    'there were {fmt_rate(payroll_flash_cur)}M payrolled employees. ',
     'This represents {flash_de_dir} ',
     '{fmt_flash_change(payroll_flash_de)} since the 2024 election, {flash_dy_dir} {fmt_flash_change(payroll_flash_dy)} ',
     'compared to the same period a year ago, and {flash_dm_dir} ',
@@ -105,20 +163,20 @@ generate_top_ten <- function() {
     'and so does not align with the table above].',
     .comment = ""
   )
-  
+
   # line 5: inactivity rate
   line5 <- glue(
-    'The 16-64s economic inactivity rate was {format(round(inact_rt_cur, 1), nsmall = 1)}% ',
+    'The 16-64s economic inactivity rate was {fmt_rate(inact_rt_cur)}% ',
     'in {lfs_period_label}, {fmt_dir(inact_rt_dy, "down", "up")} {fmt_pp(inact_rt_dy)} ',
     'from a year ago, and {fmt_dir(inact_rt_dq, "down", "up")} {fmt_pp(inact_rt_dq)} ',
     'from the previous quarter. The inactivity rate is ',
     '{fmt_pp(inact_rt_dc)} {inact_rt_covid_dir} than before the pandemic.',
     .comment = ""
   )
-  
+
   # line 6: unemployment rate
   line6 <- glue(
-    'The unemployment rate for 16+ was {format(round(unemp_rt_cur, 1), nsmall = 1)}% ',
+    'The unemployment rate for 16+ was {fmt_rate(unemp_rt_cur)}% ',
     'in {lfs_period_label}, {fmt_dir(unemp_rt_dq, "an increase of", "a decrease of")} ',
     '{fmt_pp(unemp_rt_dq)} from the previous quarter, and ',
     '{fmt_dir(unemp_rt_dy, "an increase of", "a decrease of")} {fmt_pp(unemp_rt_dy)} ',
@@ -126,7 +184,7 @@ generate_top_ten <- function() {
     '{unemp_rt_covid_dir} than before the pandemic.',
     .comment = ""
   )
-  
+
   # line 7: days lost
   days_lost_month <- if (exists("days_lost_label", inherits = TRUE) && nzchar(as.character(get("days_lost_label", inherits = TRUE)))) {
     paste0("in ", get("days_lost_label", inherits = TRUE), " ")
@@ -137,7 +195,7 @@ generate_top_ten <- function() {
     'working days lost {days_lost_month}because of labour disputes across the UK.',
     .comment = ""
   )
-  
+
   # line 8: vacancies
   # use the vacancies reference period (can differ from lfs period label)
   vac_period_label <- lfs_period_label
@@ -168,12 +226,12 @@ generate_top_ten <- function() {
     'are {vac_cur_vs_2010avg} the average in the 2010s (around 660,000).',
     .comment = ""
   )
-  
+
   # line 9: redundancies
   redund_q_dir <- dir_word(redund_dq)
   redund_y_dir <- dir_word(redund_dy)
   avg2010 <- if (!is.na(redund_cur) && redund_cur < 4.7) "below" else "above"
-  
+
   line9 <- glue(
     "The number of people reporting redundancy in {lfs_period_label}, ",
     "according to the Labour Force Survey, was {fmt_one_dec(redund_cur)} ",
@@ -185,17 +243,17 @@ generate_top_ten <- function() {
     "in the 2010s of 4.7 redundancies per thousand employees.",
     .comment = ""
   )
-  
+
   # line 10: hr1
   hr1_vs_prepandemic <- if (!is.na(hr1_cur) && hr1_cur < 27600) "below" else "above"
-  
+
   line10 <- glue(
     'The Insolvency Service were notified of {fmt_int(hr1_cur)} ',
     'potential redundancies in {hr1_month_label}. This is ',
-    '{hr1_vs_prepandemic} the pre-pandemic average of 27,600 (Apr 2019 – Feb 2020).',
+    '{hr1_vs_prepandemic} the pre-pandemic average of 27,600 (Apr 2019 \u2013 Feb 2020).',
     .comment = ""
   )
-  
+
   list(
     line1 = line1,
     line2 = line2,
@@ -218,12 +276,12 @@ print_top_ten <- function(stats) {
   cat('2.', stats$line2, '\n\n')
   cat('3.', stats$line3, '\n\n')
   cat('4.', stats$line4, '\n\n')
-  
+
   cat('5.', stats$line5, '\n\n')
   cat('6.', stats$line6, '\n\n')
   cat('7.', stats$line7, '\n\n')
   cat('8.', stats$line8, '\n\n')
   cat('9.', stats$line9, '\n\n')
   cat('10.', stats$line10, '\n\n')
- 
+
 }

@@ -974,8 +974,11 @@ server <- function(input, output, session) {
       incProgress(0.2, detail = "Step 6/6: Generating statistics...")
       
       if (exists("generate_top_ten")) {
-        top10 <- generate_top_ten()
-        topten_data(top10)
+        top10 <- tryCatch(generate_top_ten(), error = function(e) {
+          showNotification(paste("Top ten generation error:", e$message), type = "error")
+          NULL
+        })
+        if (!is.null(top10)) topten_data(top10)
       } else {
         showNotification("Error: generate_top_ten function not found", type = "error")
         return()
@@ -1052,8 +1055,19 @@ server <- function(input, output, session) {
 
             source(summary_path, local = FALSE)
             source(top_ten_path, local = FALSE)
-            summary_lines <- generate_summary()
-            top10_lines <- generate_top_ten()
+            fallback_lines <- function() {
+              stats <- list()
+              for (i in 1:10) stats[[paste0("line", i)]] <- "(Data unavailable)"
+              stats
+            }
+            summary_lines <- tryCatch(generate_summary(), error = function(e) {
+              warning("generate_summary() failed: ", e$message)
+              fallback_lines()
+            })
+            top10_lines <- tryCatch(generate_top_ten(), error = function(e) {
+              warning("generate_top_ten() failed: ", e$message)
+              fallback_lines()
+            })
 
             incProgress(0.15, detail = "Step 6/6: Writing Word file...")
 
