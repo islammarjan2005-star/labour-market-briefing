@@ -34,6 +34,9 @@ fmt_rate <- function(x) {
 
 generate_top_ten <- function() {
 
+  # top-level tryCatch: if anything fails, return fallback lines
+  tryCatch({
+
   # safe variable accessor — returns default if variable doesn't exist or is NULL
   sv <- function(name, default = NA_real_) {
     if (exists(name, inherits = TRUE)) {
@@ -266,6 +269,13 @@ generate_top_ten <- function() {
     line9 = line9,
     line10 = line10
   )
+
+  }, error = function(e) {
+    warning("generate_top_ten() internal error: ", e$message)
+    fallback <- list()
+    for (i in 1:10) fallback[[paste0("line", i)]] <- "(Data unavailable)"
+    fallback
+  })
 }
 
 # print top ten stats

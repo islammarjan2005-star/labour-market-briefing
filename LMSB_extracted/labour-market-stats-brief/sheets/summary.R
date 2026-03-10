@@ -216,7 +216,12 @@ calc_payroll_age_drops <- function() {
 
 generate_summary <- function() {
 
-  
+  # top-level tryCatch: if anything fails, return fallback lines
+  tryCatch({
+
+  # NA-safe rate formatter
+  .fmt_rate <- function(x) if (is.na(x)) "\u2014" else format(round(x, 1), nsmall = 1)
+
   mm <- if (exists("manual_month", inherits = TRUE)) get("manual_month", inherits = TRUE) else NA_character_
 
   # compute aligned/latest for payroll + vacancies 
@@ -308,8 +313,8 @@ generate_summary <- function() {
   inact_rt_dq  <- if (exists("inact_rt_dq", inherits = TRUE)) safe_num(get("inact_rt_dq", inherits=TRUE)) else NA_real_
 
   line5 <- glue(
-    "Labour Force Survey (LFS) suggests that in {lfs_lbl}, the employment rate {ifelse(is.na(emp_rt_dq) || emp_rt_dq == 0, 'was unchanged', ifelse(emp_rt_dq < 0, 'fell', 'rose'))} to {format(round(emp_rt_cur, 1), nsmall=1)}% ({fmt_signed_pp(emp_rt_dq)} compared to the previous quarter). ",
-    "On the quarter, unemployment {ifelse(is.na(unemp_rt_dq) || unemp_rt_dq >= 0, 'rose', 'fell')} to {format(round(unemp_rt_cur, 1), nsmall=1)}% ({fmt_signed_pp(unemp_rt_dq)}) and inactivity {ifelse(is.na(inact_rt_dq) || inact_rt_dq > 0, 'rose', 'fell')} to {format(round(inact_rt_cur, 1), nsmall=1)}% ({fmt_signed_pp(inact_rt_dq)}).",
+    "Labour Force Survey (LFS) suggests that in {lfs_lbl}, the employment rate {ifelse(is.na(emp_rt_dq) || emp_rt_dq == 0, 'was unchanged', ifelse(emp_rt_dq < 0, 'fell', 'rose'))} to {.fmt_rate(emp_rt_cur)}% ({fmt_signed_pp(emp_rt_dq)} compared to the previous quarter). ",
+    "On the quarter, unemployment {ifelse(is.na(unemp_rt_dq) || unemp_rt_dq >= 0, 'rose', 'fell')} to {.fmt_rate(unemp_rt_cur)}% ({fmt_signed_pp(unemp_rt_dq)}) and inactivity {ifelse(is.na(inact_rt_dq) || inact_rt_dq > 0, 'rose', 'fell')} to {.fmt_rate(inact_rt_cur)}% ({fmt_signed_pp(inact_rt_dq)}).",
     .comment = ""
   )
 
@@ -384,4 +389,11 @@ generate_summary <- function() {
     line9 = as.character(line9),
     line10 = as.character(line10)
   )
+
+  }, error = function(e) {
+    warning("generate_summary() internal error: ", e$message)
+    fallback <- list()
+    for (i in 1:10) fallback[[paste0("line", i)]] <- "(Data unavailable)"
+    fallback
+  })
 }
