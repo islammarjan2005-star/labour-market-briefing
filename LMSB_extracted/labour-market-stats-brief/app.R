@@ -649,11 +649,13 @@ server <- function(input, output, session) {
     missing <- setdiff(expected_sheets, sheets)
     if (length(missing) > 0) {
       showNotification(
-        paste0("This doesn't look like a ", file_label, " file. Missing sheets: ",
-               paste(missing, collapse = ", ")),
-        type = "warning", duration = 10
+        paste0("Rejected: this doesn't look like a valid ", file_label,
+               " file. Missing sheets: ", paste(missing, collapse = ", ")),
+        type = "error", duration = 10
       )
+      return(FALSE)
     }
+    TRUE
   }
 
   # auto-detect uploaded files by filename and sheet contents
@@ -689,30 +691,32 @@ server <- function(input, output, session) {
         next
       }
 
-      # validate and store
+      # validate sheets then store — skip file if validation fails
+      valid <- FALSE
       if (ftype == "a01") {
-        .validate_excel(files$datapath[i], c("1", "10", "13", "15", "19"), "A01")
-        uploaded_files$a01 <- files$datapath[i]
-        # detect reference month from A01
-        tryCatch({
-          if (!exists(".detect_manual_month_from_a01", inherits = TRUE)) {
-            source("utils/calculations_from_excel.R", local = FALSE)
-          }
-          detected <- .detect_manual_month_from_a01(files$datapath[i])
-          if (!is.null(detected)) .update_ref_month(detected)
-        }, error = function(e) NULL)
+        valid <- .validate_excel(files$datapath[i], c("1", "10", "13", "15", "19"), "A01")
+        if (valid) {
+          uploaded_files$a01 <- files$datapath[i]
+          tryCatch({
+            if (!exists(".detect_manual_month_from_a01", inherits = TRUE)) {
+              source("utils/calculations_from_excel.R", local = FALSE)
+            }
+            detected <- .detect_manual_month_from_a01(files$datapath[i])
+            if (!is.null(detected)) .update_ref_month(detected)
+          }, error = function(e) NULL)
+        }
       } else if (ftype == "hr1") {
-        .validate_excel(files$datapath[i], c("1a"), "HR1")
-        uploaded_files$hr1 <- files$datapath[i]
+        valid <- .validate_excel(files$datapath[i], c("1a"), "HR1")
+        if (valid) uploaded_files$hr1 <- files$datapath[i]
       } else if (ftype == "x09") {
-        .validate_excel(files$datapath[i], c("AWE Real_CPI"), "X09")
-        uploaded_files$x09 <- files$datapath[i]
+        valid <- .validate_excel(files$datapath[i], c("AWE Real_CPI"), "X09")
+        if (valid) uploaded_files$x09 <- files$datapath[i]
       } else if (ftype == "rtisa") {
-        .validate_excel(files$datapath[i], c("1. Payrolled employees (UK)", "23. Employees (Industry)"), "RTISA")
-        uploaded_files$rtisa <- files$datapath[i]
+        valid <- .validate_excel(files$datapath[i], c("1. Payrolled employees (UK)", "23. Employees (Industry)"), "RTISA")
+        if (valid) uploaded_files$rtisa <- files$datapath[i]
       }
 
-      detected_types <- c(detected_types, toupper(ftype))
+      if (valid) detected_types <- c(detected_types, toupper(ftype))
     }
 
     if (length(detected_types) > 0) {
