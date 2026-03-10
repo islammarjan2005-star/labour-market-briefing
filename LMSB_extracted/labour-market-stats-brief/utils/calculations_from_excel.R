@@ -549,5 +549,27 @@ run_calculations_from_excel <- function(manual_month,
   # inactivity driver text (not available from Excel)
   assign("inact_driver_text", "", envir = target_env)
 
+  # Create payroll list object (needed by summary.R fallback when calculate_payroll() is unavailable)
+  assign("payroll", list(
+    cur = payroll_cur, dq = payroll_dq, dy = payroll_dy,
+    dc = payroll_dc, de = payroll_de,
+    flash_cur = payroll_flash_cur, flash_dm = payroll_flash_dm,
+    flash_dy = payroll_flash_dy, flash_de = payroll_flash_de,
+    flash_anchor = flash_anchor, anchor = anchor_m
+  ), envir = target_env)
+
+  # Create wages_nom list object (needed by summary.R for wages period label)
+  assign("wages_nom", list(
+    total = list(cur = latest_wages, dq = wages_change_q,
+                 dy = wages_change_y, dc = wages_change_covid,
+                 de = wages_change_election,
+                 public = wages_total_public, private = wages_total_private,
+                 qchange = wages_total_qchange),
+    regular = list(cur = latest_regular_cash,
+                   public = wages_reg_public, private = wages_reg_private,
+                   qchange = wages_reg_qchange),
+    anchor = anchor_m
+  ), envir = target_env)
+
   invisible(TRUE)
 }
