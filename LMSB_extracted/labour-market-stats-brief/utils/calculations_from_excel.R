@@ -116,7 +116,7 @@ run_calculations_from_excel <- function(manual_month,
   lfs_end_q    <- anchor_m %m-% months(3)      # Sep 2025
   lfs_end_y    <- anchor_m %m-% months(12)     # Dec 2024
   lfs_end_covid <- as.Date("2020-02-01")       # Dec-Feb 2020
-  lfs_end_elec  <- as.Date("2024-07-01")       # May-Jul 2024
+  lfs_end_elec  <- as.Date("2024-06-01")       # Apr-Jun 2024
 
   lab_cur   <- .lfs_label(lfs_end_cur)   # "Oct-Dec 2025"
   lab_q     <- .lfs_label(lfs_end_q)     # "Jul-Sep 2025"
