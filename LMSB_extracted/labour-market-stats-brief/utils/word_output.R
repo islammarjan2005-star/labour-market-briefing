@@ -1,5 +1,5 @@
 # word_output.r
-# fills lmsb_placeholders_v2 placeholders and conditional-colour tokens.
+# fills LMB__ prefixed placeholders and conditional-colour tokens.
 # run from: project root directory
 
 suppressPackageStartupMessages({
@@ -198,107 +198,104 @@ generate_word_output <- function(template_path = "utils/DB.docx",
   doc <- read_docx(template_path)
   
   title_label <- if (exists("manual_month", inherits = TRUE)) manual_month_to_label(manual_month) else ""
-  doc <- replace_all(doc, "Z1", title_label)
-  if (exists("lfs_period_label", inherits = TRUE)) doc <- replace_all(doc, "LFS_PERIOD_LABEL", lfs_period_label)
-  if (exists("lfs_period_short_label", inherits = TRUE)) doc <- replace_all(doc, "LFS_QUARTER_LABEL", lfs_period_short_label)
-  if (exists("vacancies_period_short_label", inherits = TRUE)) doc <- replace_all(doc, "VACANCIES_QUARTER_LABEL", vacancies_period_short_label)
-  
-  for (i in 10:1) doc <- replace_all(doc, paste0("sl", i), summary[[paste0("line", i)]])
-  for (i in 10:1) doc <- replace_all(doc, paste0("tt", i), top10[[paste0("line", i)]])
-  
-  doc <- replace_all(doc, "RENDER_DATE", format(Sys.Date(), "%d %B %Y"))
+  doc <- replace_all(doc, "LMB__MONTH_LABEL", title_label)
+  if (exists("lfs_period_label", inherits = TRUE)) doc <- replace_all(doc, "LMB__LFS_PERIOD", lfs_period_label)
+  if (exists("lfs_period_short_label", inherits = TRUE)) doc <- replace_all(doc, "LMB__LFS_QUARTER", lfs_period_short_label)
+  if (exists("vacancies_period_short_label", inherits = TRUE)) doc <- replace_all(doc, "LMB__VAC_QUARTER", vacancies_period_short_label)
+
+  for (i in 1:10) doc <- replace_all(doc, sprintf("LMB__SL%02d", i), summary[[paste0("line", i)]])
+  for (i in 1:10) doc <- replace_all(doc, sprintf("LMB__TT%02d", i), top10[[paste0("line", i)]])
+
+  doc <- replace_all(doc, "LMB__RENDER_DATE", format(Sys.Date(), "%d %B %Y"))
   
   # current (no conditional except vacancies)
-  doc <- replace_all(doc, "B1", fmt_count_000s_current(emp16_cur))
-  doc <- replace_all(doc, "C1", .format_pct(emp_rt_cur))
-  
-  doc <- replace_all(doc, "D1", fmt_count_000s_current(unemp16_cur))
-  doc <- replace_all(doc, "E1", .format_pct(unemp_rt_cur))
-  
-  doc <- replace_all(doc, "F1", fmt_count_000s_current(inact_cur))
-  doc <- replace_all(doc, "G1", fmt_count_000s_current(inact5064_cur))
-  doc <- replace_all(doc, "H1", .format_pct(inact_rt_cur))
-  doc <- replace_all(doc, "I1", .format_pct(inact5064_rt_cur))
-  
-  doc <- replace_all(doc, "K1", fmt_exempt_current(payroll_cur))
-  
+  doc <- replace_all(doc, "LMB__EMP_CUR", fmt_count_000s_current(emp16_cur))
+  doc <- replace_all(doc, "LMB__EMPRT_CUR", .format_pct(emp_rt_cur))
+  doc <- replace_all(doc, "LMB__UNEMP_CUR", fmt_count_000s_current(unemp16_cur))
+  doc <- replace_all(doc, "LMB__UNEMPRT_CUR", .format_pct(unemp_rt_cur))
+  doc <- replace_all(doc, "LMB__INACT_CUR", fmt_count_000s_current(inact_cur))
+  doc <- replace_all(doc, "LMB__INACT5064_CUR", fmt_count_000s_current(inact5064_cur))
+  doc <- replace_all(doc, "LMB__INACTRT_CUR", .format_pct(inact_rt_cur))
+  doc <- replace_all(doc, "LMB__INACT5064RT_CUR", .format_pct(inact5064_rt_cur))
+  doc <- replace_all(doc, "LMB__PAYROLL_CUR", fmt_exempt_current(payroll_cur))
+
   # vacancies current is conditional tokens (neutral)
-  doc <- fill_conditional(doc, "J1", fmt_exempt_current(vac_cur), 0, neutral = TRUE)
-  
-  doc <- replace_all(doc, "L1", .format_pct(latest_wages))
-  doc <- replace_all(doc, "M1", .format_pct(latest_wages_cpi))
-  
+  doc <- fill_conditional(doc, "LMB__VAC_CUR", fmt_exempt_current(vac_cur), 0, neutral = TRUE)
+
+  doc <- replace_all(doc, "LMB__WAGENOM_CUR", .format_pct(latest_wages))
+  doc <- replace_all(doc, "LMB__WAGECPI_CUR", .format_pct(latest_wages_cpi))
+
   # dq/dy/dc conditional
-  doc <- fill_conditional(doc, "B2", fmt_count_000s_change(emp16_dq), emp16_dq, invert = FALSE)
-  doc <- fill_conditional(doc, "B3", fmt_count_000s_change(emp16_dy), emp16_dy, invert = FALSE)
-  doc <- fill_conditional(doc, "B4", fmt_count_000s_change(emp16_dc), emp16_dc, invert = FALSE)
-  
-  doc <- fill_conditional(doc, "C2", .format_pp(emp_rt_dq), emp_rt_dq, invert = FALSE)
-  doc <- fill_conditional(doc, "C3", .format_pp(emp_rt_dy), emp_rt_dy, invert = FALSE)
-  doc <- fill_conditional(doc, "C4", .format_pp(emp_rt_dc), emp_rt_dc, invert = FALSE)
-  
-  doc <- fill_conditional(doc, "D2", fmt_count_000s_change(unemp16_dq), unemp16_dq, invert = TRUE)
-  doc <- fill_conditional(doc, "D3", fmt_count_000s_change(unemp16_dy), unemp16_dy, invert = TRUE)
-  doc <- fill_conditional(doc, "D4", fmt_count_000s_change(unemp16_dc), unemp16_dc, invert = TRUE)
-  
-  doc <- fill_conditional(doc, "E2", .format_pp(unemp_rt_dq), unemp_rt_dq, invert = TRUE)
-  doc <- fill_conditional(doc, "E3", .format_pp(unemp_rt_dy), unemp_rt_dy, invert = TRUE)
-  doc <- fill_conditional(doc, "E4", .format_pp(unemp_rt_dc), unemp_rt_dc, invert = TRUE)
-  
-  doc <- fill_conditional(doc, "F2", fmt_count_000s_change(inact_dq), inact_dq, invert = TRUE)
-  doc <- fill_conditional(doc, "F3", fmt_count_000s_change(inact_dy), inact_dy, invert = TRUE)
-  doc <- fill_conditional(doc, "F4", fmt_count_000s_change(inact_dc), inact_dc, invert = TRUE)
-  
-  doc <- fill_conditional(doc, "G2", fmt_count_000s_change(inact5064_dq), inact5064_dq, invert = TRUE)
-  doc <- fill_conditional(doc, "G3", fmt_count_000s_change(inact5064_dy), inact5064_dy, invert = TRUE)
-  doc <- fill_conditional(doc, "G4", fmt_count_000s_change(inact5064_dc), inact5064_dc, invert = TRUE)
-  
-  doc <- fill_conditional(doc, "H2", .format_pp(inact_rt_dq), inact_rt_dq, invert = TRUE)
-  doc <- fill_conditional(doc, "H3", .format_pp(inact_rt_dy), inact_rt_dy, invert = TRUE)
-  doc <- fill_conditional(doc, "H4", .format_pp(inact_rt_dc), inact_rt_dc, invert = TRUE)
-  
-  doc <- fill_conditional(doc, "I2", .format_pp(inact5064_rt_dq), inact5064_rt_dq, invert = TRUE)
-  doc <- fill_conditional(doc, "I3", .format_pp(inact5064_rt_dy), inact5064_rt_dy, invert = TRUE)
-  doc <- fill_conditional(doc, "I4", .format_pp(inact5064_rt_dc), inact5064_rt_dc, invert = TRUE)
-  
-  doc <- fill_conditional(doc, "K2", fmt_exempt_change(payroll_dq), payroll_dq, invert = FALSE)
-  doc <- fill_conditional(doc, "K3", fmt_exempt_change(payroll_dy), payroll_dy, invert = FALSE)
-  doc <- fill_conditional(doc, "K4", fmt_exempt_change(payroll_dc), payroll_dc, invert = FALSE)
-  
+  doc <- fill_conditional(doc, "LMB__EMP_DQ", fmt_count_000s_change(emp16_dq), emp16_dq, invert = FALSE)
+  doc <- fill_conditional(doc, "LMB__EMP_DY", fmt_count_000s_change(emp16_dy), emp16_dy, invert = FALSE)
+  doc <- fill_conditional(doc, "LMB__EMP_DC", fmt_count_000s_change(emp16_dc), emp16_dc, invert = FALSE)
+
+  doc <- fill_conditional(doc, "LMB__EMPRT_DQ", .format_pp(emp_rt_dq), emp_rt_dq, invert = FALSE)
+  doc <- fill_conditional(doc, "LMB__EMPRT_DY", .format_pp(emp_rt_dy), emp_rt_dy, invert = FALSE)
+  doc <- fill_conditional(doc, "LMB__EMPRT_DC", .format_pp(emp_rt_dc), emp_rt_dc, invert = FALSE)
+
+  doc <- fill_conditional(doc, "LMB__UNEMP_DQ", fmt_count_000s_change(unemp16_dq), unemp16_dq, invert = TRUE)
+  doc <- fill_conditional(doc, "LMB__UNEMP_DY", fmt_count_000s_change(unemp16_dy), unemp16_dy, invert = TRUE)
+  doc <- fill_conditional(doc, "LMB__UNEMP_DC", fmt_count_000s_change(unemp16_dc), unemp16_dc, invert = TRUE)
+
+  doc <- fill_conditional(doc, "LMB__UNEMPRT_DQ", .format_pp(unemp_rt_dq), unemp_rt_dq, invert = TRUE)
+  doc <- fill_conditional(doc, "LMB__UNEMPRT_DY", .format_pp(unemp_rt_dy), unemp_rt_dy, invert = TRUE)
+  doc <- fill_conditional(doc, "LMB__UNEMPRT_DC", .format_pp(unemp_rt_dc), unemp_rt_dc, invert = TRUE)
+
+  doc <- fill_conditional(doc, "LMB__INACT_DQ", fmt_count_000s_change(inact_dq), inact_dq, invert = TRUE)
+  doc <- fill_conditional(doc, "LMB__INACT_DY", fmt_count_000s_change(inact_dy), inact_dy, invert = TRUE)
+  doc <- fill_conditional(doc, "LMB__INACT_DC", fmt_count_000s_change(inact_dc), inact_dc, invert = TRUE)
+
+  doc <- fill_conditional(doc, "LMB__INACT5064_DQ", fmt_count_000s_change(inact5064_dq), inact5064_dq, invert = TRUE)
+  doc <- fill_conditional(doc, "LMB__INACT5064_DY", fmt_count_000s_change(inact5064_dy), inact5064_dy, invert = TRUE)
+  doc <- fill_conditional(doc, "LMB__INACT5064_DC", fmt_count_000s_change(inact5064_dc), inact5064_dc, invert = TRUE)
+
+  doc <- fill_conditional(doc, "LMB__INACTRT_DQ", .format_pp(inact_rt_dq), inact_rt_dq, invert = TRUE)
+  doc <- fill_conditional(doc, "LMB__INACTRT_DY", .format_pp(inact_rt_dy), inact_rt_dy, invert = TRUE)
+  doc <- fill_conditional(doc, "LMB__INACTRT_DC", .format_pp(inact_rt_dc), inact_rt_dc, invert = TRUE)
+
+  doc <- fill_conditional(doc, "LMB__INACT5064RT_DQ", .format_pp(inact5064_rt_dq), inact5064_rt_dq, invert = TRUE)
+  doc <- fill_conditional(doc, "LMB__INACT5064RT_DY", .format_pp(inact5064_rt_dy), inact5064_rt_dy, invert = TRUE)
+  doc <- fill_conditional(doc, "LMB__INACT5064RT_DC", .format_pp(inact5064_rt_dc), inact5064_rt_dc, invert = TRUE)
+
+  doc <- fill_conditional(doc, "LMB__PAYROLL_DQ", fmt_exempt_change(payroll_dq), payroll_dq, invert = FALSE)
+  doc <- fill_conditional(doc, "LMB__PAYROLL_DY", fmt_exempt_change(payroll_dy), payroll_dy, invert = FALSE)
+  doc <- fill_conditional(doc, "LMB__PAYROLL_DC", fmt_exempt_change(payroll_dc), payroll_dc, invert = FALSE)
+
   # vacancies neutral across changes
-  doc <- fill_conditional(doc, "J2", fmt_exempt_change(vac_dq), 0, neutral = TRUE)
-  doc <- fill_conditional(doc, "J3", fmt_exempt_change(vac_dy), 0, neutral = TRUE)
-  doc <- fill_conditional(doc, "J4", fmt_exempt_change(vac_dc), 0, neutral = TRUE)
-  
-  doc <- fill_conditional(doc, "L2", .format_gbp_signed0(wages_change_q), wages_change_q, invert = FALSE)
-  doc <- fill_conditional(doc, "L3", .format_gbp_signed0(wages_change_y), wages_change_y, invert = FALSE)
-  doc <- fill_conditional(doc, "L4", .format_gbp_signed0(wages_change_covid), wages_change_covid, invert = FALSE)
-  
-  doc <- fill_conditional(doc, "M2", .format_gbp_signed0(wages_cpi_change_q), wages_cpi_change_q, invert = FALSE)
-  doc <- fill_conditional(doc, "M3", .format_gbp_signed0(wages_cpi_change_y), wages_cpi_change_y, invert = FALSE)
-  doc <- fill_conditional(doc, "M4", .format_gbp_signed0(wages_cpi_change_covid), wages_cpi_change_covid, invert = FALSE)
-  
+  doc <- fill_conditional(doc, "LMB__VAC_DQ", fmt_exempt_change(vac_dq), 0, neutral = TRUE)
+  doc <- fill_conditional(doc, "LMB__VAC_DY", fmt_exempt_change(vac_dy), 0, neutral = TRUE)
+  doc <- fill_conditional(doc, "LMB__VAC_DC", fmt_exempt_change(vac_dc), 0, neutral = TRUE)
+
+  doc <- fill_conditional(doc, "LMB__WAGENOM_DQ", .format_gbp_signed0(wages_change_q), wages_change_q, invert = FALSE)
+  doc <- fill_conditional(doc, "LMB__WAGENOM_DY", .format_gbp_signed0(wages_change_y), wages_change_y, invert = FALSE)
+  doc <- fill_conditional(doc, "LMB__WAGENOM_DC", .format_gbp_signed0(wages_change_covid), wages_change_covid, invert = FALSE)
+
+  doc <- fill_conditional(doc, "LMB__WAGECPI_DQ", .format_gbp_signed0(wages_cpi_change_q), wages_cpi_change_q, invert = FALSE)
+  doc <- fill_conditional(doc, "LMB__WAGECPI_DY", .format_gbp_signed0(wages_cpi_change_y), wages_cpi_change_y, invert = FALSE)
+  doc <- fill_conditional(doc, "LMB__WAGECPI_DC", .format_gbp_signed0(wages_cpi_change_covid), wages_cpi_change_covid, invert = FALSE)
+
   # election column
   if (exists("emp16_de", inherits = TRUE)) {
-    doc <- fill_conditional(doc, "B5", fmt_count_000s_change(emp16_de), emp16_de, invert = FALSE)
-    doc <- fill_conditional(doc, "C5", .format_pp(emp_rt_de), emp_rt_de, invert = FALSE)
-    
-    doc <- fill_conditional(doc, "D5", fmt_count_000s_change(unemp16_de), unemp16_de, invert = TRUE)
-    doc <- fill_conditional(doc, "E5", .format_pp(unemp_rt_de), unemp_rt_de, invert = TRUE)
-    
-    doc <- fill_conditional(doc, "F5", fmt_count_000s_change(inact_de), inact_de, invert = TRUE)
-    doc <- fill_conditional(doc, "G5", fmt_count_000s_change(inact5064_de), inact5064_de, invert = TRUE)
-    doc <- fill_conditional(doc, "H5", .format_pp(inact_rt_de), inact_rt_de, invert = TRUE)
-    doc <- fill_conditional(doc, "I5", .format_pp(inact5064_rt_de), inact5064_rt_de, invert = TRUE)
-    
-    doc <- fill_conditional(doc, "K5", fmt_exempt_change(payroll_de), payroll_de, invert = FALSE)
-    doc <- fill_conditional(doc, "J5", fmt_exempt_change(vac_de), 0, neutral = TRUE)
-    
+    doc <- fill_conditional(doc, "LMB__EMP_DE", fmt_count_000s_change(emp16_de), emp16_de, invert = FALSE)
+    doc <- fill_conditional(doc, "LMB__EMPRT_DE", .format_pp(emp_rt_de), emp_rt_de, invert = FALSE)
+
+    doc <- fill_conditional(doc, "LMB__UNEMP_DE", fmt_count_000s_change(unemp16_de), unemp16_de, invert = TRUE)
+    doc <- fill_conditional(doc, "LMB__UNEMPRT_DE", .format_pp(unemp_rt_de), unemp_rt_de, invert = TRUE)
+
+    doc <- fill_conditional(doc, "LMB__INACT_DE", fmt_count_000s_change(inact_de), inact_de, invert = TRUE)
+    doc <- fill_conditional(doc, "LMB__INACT5064_DE", fmt_count_000s_change(inact5064_de), inact5064_de, invert = TRUE)
+    doc <- fill_conditional(doc, "LMB__INACTRT_DE", .format_pp(inact_rt_de), inact_rt_de, invert = TRUE)
+    doc <- fill_conditional(doc, "LMB__INACT5064RT_DE", .format_pp(inact5064_rt_de), inact5064_rt_de, invert = TRUE)
+
+    doc <- fill_conditional(doc, "LMB__PAYROLL_DE", fmt_exempt_change(payroll_de), payroll_de, invert = FALSE)
+    doc <- fill_conditional(doc, "LMB__VAC_DE", fmt_exempt_change(vac_de), 0, neutral = TRUE)
+
     if (exists("wages_change_election", inherits = TRUE)) {
-      doc <- fill_conditional(doc, "L5", .format_gbp_signed0(wages_change_election), wages_change_election, invert = FALSE)
+      doc <- fill_conditional(doc, "LMB__WAGENOM_DE", .format_gbp_signed0(wages_change_election), wages_change_election, invert = FALSE)
     }
     if (exists("wages_cpi_change_election", inherits = TRUE)) {
-      doc <- fill_conditional(doc, "M5", .format_gbp_signed0(wages_cpi_change_election), wages_cpi_change_election, invert = FALSE)
+      doc <- fill_conditional(doc, "LMB__WAGECPI_DE", .format_gbp_signed0(wages_cpi_change_election), wages_cpi_change_election, invert = FALSE)
     }
   }
   
