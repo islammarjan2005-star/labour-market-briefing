@@ -139,48 +139,62 @@ generate_word_output <- function(template_path = "utils/DB.docx",
                                  file_hr1 = NULL,
                                  verbose = TRUE) {
 
-  # source config first (auto-detects manual_month from database)
-  source(config_path, local = FALSE)
-
-  if (!is.null(manual_month_override)) manual_month <<- tolower(manual_month_override)
-
-  # optional: allow vacancies/payroll to be aligned with reference quarter (or latest)
-  # - pass both together via vac_payroll_mode_override (legacy)
-  # - or pass independently via vacancies_mode_override / payroll_mode_override
-  if (!is.null(vac_payroll_mode_override) && is.null(vacancies_mode_override) && is.null(payroll_mode_override)) {
-    mode <- tolower(as.character(vac_payroll_mode_override))
-    mode <- if (mode %in% c("latest", "aligned")) mode else "latest"
-    vacancies_mode <<- mode
-    payroll_mode <<- mode
-  }
-
-  if (!is.null(vacancies_mode_override)) {
-    mode <- tolower(as.character(vacancies_mode_override))
-    vacancies_mode <<- if (mode %in% c("latest", "aligned")) mode else "latest"
-  }
-
-  if (!is.null(payroll_mode_override)) {
-    mode <- tolower(as.character(payroll_mode_override))
-    payroll_mode <<- if (mode %in% c("latest", "aligned")) mode else "latest"
-  }
-
-  if (verbose && exists("manual_month", inherits = TRUE)) message("[word_output] manual_month = ", manual_month)
-
   # choose calculation mode: Excel files or database
   excel_mode <- !is.null(file_a01) || !is.null(file_x09) || !is.null(file_rtisa) || !is.null(file_hr1)
 
   if (excel_mode) {
-    # Excel mode: read metrics from uploaded ONS spreadsheets
+    # Excel mode: skip database config, set manual_month directly
+    if (!is.null(manual_month_override)) {
+      manual_month <<- tolower(manual_month_override)
+    } else {
+      stop("manual_month_override is required when using Excel files")
+    }
+
+    # source helpers and Excel calculations
     source("utils/helpers.R", local = FALSE)
     source("utils/calculations_from_excel.R", local = FALSE)
     run_calculations_from_excel(manual_month,
                                 file_a01 = file_a01, file_hr1 = file_hr1,
                                 file_x09 = file_x09, file_rtisa = file_rtisa)
+
+    # stub objects for sections not available from Excel files
+    if (!exists("workforce_jobs", envir = globalenv()))
+      workforce_jobs <<- list(period = "", data = data.frame(industry = character(), value = numeric()))
+    if (!exists("unemployment_by_age", envir = globalenv()))
+      unemployment_by_age <<- list(period = "", level = data.frame(age_group = character(), value = numeric()),
+                                   rate = data.frame(age_group = character(), value = numeric()))
+    if (!exists("payroll_by_age", envir = globalenv()))
+      payroll_by_age <<- list(period = "", data = data.frame(age_group = character(), value = numeric()))
+
     if (verbose) message("[word_output] Using Excel-based calculations")
   } else {
-    # Database mode: source calculations (this sources helpers.r and all sheets)
+    # Database mode: source config (auto-detects manual_month) then calculations
+    source(config_path, local = FALSE)
+    if (!is.null(manual_month_override)) manual_month <<- tolower(manual_month_override)
+
+    # optional: allow vacancies/payroll to be aligned with reference quarter (or latest)
+    if (!is.null(vac_payroll_mode_override) && is.null(vacancies_mode_override) && is.null(payroll_mode_override)) {
+      mode <- tolower(as.character(vac_payroll_mode_override))
+      mode <- if (mode %in% c("latest", "aligned")) mode else "latest"
+      vacancies_mode <<- mode
+      payroll_mode <<- mode
+    }
+
+    if (!is.null(vacancies_mode_override)) {
+      mode <- tolower(as.character(vacancies_mode_override))
+      vacancies_mode <<- if (mode %in% c("latest", "aligned")) mode else "latest"
+    }
+
+    if (!is.null(payroll_mode_override)) {
+      mode <- tolower(as.character(payroll_mode_override))
+      payroll_mode <<- if (mode %in% c("latest", "aligned")) mode else "latest"
+    }
+
+    # source calculations (this sources helpers.r and all sheets)
     source(calculations_path, local = FALSE)
   }
+
+  if (verbose && exists("manual_month", inherits = TRUE)) message("[word_output] manual_month = ", manual_month)
   
   # source summary and top ten
   source(summary_path, local = FALSE)
