@@ -2,6 +2,11 @@
 
 library(glue)
 
+# ensure helpers are loaded (formatters like fmt_pct, fmt_pp, fmt_dir, etc.)
+if (!exists("fmt_pct", inherits = TRUE)) {
+  source("utils/helpers.R")
+}
+
 # helper functions
 
 dir_word <- function(x) {

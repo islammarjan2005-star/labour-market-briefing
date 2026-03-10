@@ -533,7 +533,7 @@ ui <- fluidPage(
                             div(class = "dashboard-card__header", "Manual (Excel Upload)"),
                             div(class = "dashboard-card__content",
 
-                                p(class = "govuk-body", "Upload all 4 ONS Excel files to generate from local data."),
+                                p(class = "govuk-body", "Upload ONS Excel files to generate from local data. A01 is required; others are optional."),
                                 tags$ul(class = "govuk-list",
                                     tags$li(tags$a(href = "https://www.ons.gov.uk/employmentandlabourmarket/peopleinwork/employmentandemployeetypes/datasets/summaryoflabourmarketstatistics/current",
                                                    target = "_blank", "A01: Summary of labour market statistics")),
@@ -612,17 +612,16 @@ server <- function(input, output, session) {
   top_ten_path      <- "sheets/top_ten_stats.R"
   template_path     <- "utils/DB.docx"
 
-  # helper: check if ALL 4 Excel files have been uploaded
+  # helper: check if A01 (minimum required) has been uploaded
   has_uploads <- function() {
-    !is.null(uploaded_files$a01) && !is.null(uploaded_files$hr1) &&
-      !is.null(uploaded_files$x09) && !is.null(uploaded_files$rtisa)
+    !is.null(uploaded_files$a01)
   }
 
   has_any_upload <- function() {
     !is.null(uploaded_files$a01) || !is.null(uploaded_files$hr1) ||
       !is.null(uploaded_files$x09) || !is.null(uploaded_files$rtisa)
   }
-  
+
   # reactive values
   dashboard_data <- reactiveVal(NULL)
   topten_data <- reactiveVal(NULL)
@@ -635,34 +634,77 @@ server <- function(input, output, session) {
     rtisa = NULL
   )
 
-  # track uploads
-  observeEvent(input$upload_a01, { uploaded_files$a01 <- input$upload_a01$datapath })
-  observeEvent(input$upload_hr1, { uploaded_files$hr1 <- input$upload_hr1$datapath })
-  observeEvent(input$upload_x09, { uploaded_files$x09 <- input$upload_x09$datapath })
-  observeEvent(input$upload_rtisa, { uploaded_files$rtisa <- input$upload_rtisa$datapath })
-
-  # upload status display
-  output$upload_status <- renderUI({
-    present <- c(
-      A01   = !is.null(uploaded_files$a01),
-      HR1   = !is.null(uploaded_files$hr1),
-      X09   = !is.null(uploaded_files$x09),
-      RTISA = !is.null(uploaded_files$rtisa)
-    )
-    n_up <- sum(present)
-    if (n_up == 0) return(NULL)
-    if (n_up == 4) {
-      return(div(style = "margin-top: 10px;",
-                 span(class = "govuk-tag govuk-tag--green", "Ready"),
-                 span(style = "margin-left: 8px;", "4 of 4 uploaded")
-      ))
+  # Validate Excel sheets on upload and warn if wrong file
+  .validate_excel <- function(path, expected_sheets, file_label) {
+    sheets <- tryCatch(readxl::excel_sheets(path), error = function(e) character(0))
+    missing <- setdiff(expected_sheets, sheets)
+    if (length(missing) > 0) {
+      showNotification(
+        paste0("This doesn't look like a ", file_label, " file. Missing sheets: ",
+               paste(missing, collapse = ", ")),
+        type = "warning", duration = 10
+      )
     }
-    missing <- names(present)[!present]
-    div(style = "margin-top: 10px;",
-        span(class = "govuk-tag govuk-tag--amber", paste(n_up, "of 4")),
-        span(style = "margin-left: 8px; color: #f47738; font-weight: 600;",
-             paste("Missing:", paste(missing, collapse = ", ")))
+  }
+
+  # track uploads with validation
+  observeEvent(input$upload_a01, {
+    path <- input$upload_a01$datapath
+    .validate_excel(path, c("1", "10", "13", "15", "19"), "A01")
+    uploaded_files$a01 <- path
+
+    # Immediately detect reference month from A01
+    tryCatch({
+      if (!exists(".detect_manual_month_from_a01", inherits = TRUE)) {
+        source("utils/calculations_from_excel.R", local = FALSE)
+      }
+      detected <- .detect_manual_month_from_a01(path)
+      if (!is.null(detected)) .update_ref_month(detected)
+    }, error = function(e) NULL)
+  })
+  observeEvent(input$upload_hr1, {
+    path <- input$upload_hr1$datapath
+    .validate_excel(path, c("1a"), "HR1")
+    uploaded_files$hr1 <- path
+  })
+  observeEvent(input$upload_x09, {
+    path <- input$upload_x09$datapath
+    .validate_excel(path, c("AWE Real_CPI"), "X09")
+    uploaded_files$x09 <- path
+  })
+  observeEvent(input$upload_rtisa, {
+    path <- input$upload_rtisa$datapath
+    .validate_excel(path, c("1. Payrolled employees (UK)", "23. Employees (Industry)"), "RTISA")
+    uploaded_files$rtisa <- path
+  })
+
+  # upload status display — per-file ticks with detected month
+  output$upload_status <- renderUI({
+    files <- list(
+      A01   = uploaded_files$a01,
+      HR1   = uploaded_files$hr1,
+      X09   = uploaded_files$x09,
+      RTISA = uploaded_files$rtisa
     )
+    n_up <- sum(!vapply(files, is.null, logical(1)))
+    if (n_up == 0) return(NULL)
+
+    tags <- lapply(names(files), function(nm) {
+      if (!is.null(files[[nm]])) {
+        span(class = "govuk-tag govuk-tag--green", style = "margin-right: 4px;",
+             paste0(nm, " \u2713"))
+      } else {
+        span(class = "govuk-tag govuk-tag--grey", style = "margin-right: 4px;", nm)
+      }
+    })
+
+    mm <- reference_manual_month()
+    month_line <- if (!is.null(mm) && nzchar(mm) && !is.null(uploaded_files$a01)) {
+      div(style = "margin-top: 6px; font-weight: 600;",
+          paste0("Reference month: ", manual_month_to_display(mm)))
+    }
+
+    div(style = "margin-top: 10px;", tagList(tags), month_line)
   })
   
   reference_manual_month <- reactiveVal(NULL)
@@ -1030,7 +1072,9 @@ server <- function(input, output, session) {
 
   output$download_word <- downloadHandler(
     filename = function() {
-      paste0("Labour_Market_Brief_", format(Sys.Date(), "%Y-%m-%d"), ".docx")
+      mm <- reference_manual_month()
+      label <- if (!is.null(mm) && nzchar(mm)) manual_month_to_display(mm) else format(Sys.Date(), "%B %Y")
+      paste0("Labour Market Stats Briefing - ", label, ".docx")
     },
     content = function(file) {
 
@@ -1110,7 +1154,9 @@ server <- function(input, output, session) {
 
   output$download_excel <- downloadHandler(
     filename = function() {
-      "LM_Stats_Audit.xlsx"
+      mm <- reference_manual_month()
+      label <- if (!is.null(mm) && nzchar(mm)) manual_month_to_display(mm) else format(Sys.Date(), "%B %Y")
+      paste0("LM Stats Audit - ", label, ".xlsx")
     },
     content = function(file) {
       # :
@@ -1184,17 +1230,20 @@ server <- function(input, output, session) {
   # ========================================================================
 
   .check_manual_ready <- function() {
-    if (!has_uploads()) {
-      present <- c(
-        A01 = !is.null(uploaded_files$a01), HR1 = !is.null(uploaded_files$hr1),
-        X09 = !is.null(uploaded_files$x09), RTISA = !is.null(uploaded_files$rtisa)
-      )
-      missing <- names(present)[!present]
-      showNotification(
-        paste("Upload all 4 Excel files first. Missing:", paste(missing, collapse = ", ")),
-        type = "warning", duration = 5
-      )
+    if (is.null(uploaded_files$a01)) {
+      showNotification("Upload at least the A01 file", type = "warning", duration = 5)
       return(FALSE)
+    }
+    missing <- c()
+    if (is.null(uploaded_files$hr1))   missing <- c(missing, "HR1 (redundancy notifications)")
+    if (is.null(uploaded_files$x09))   missing <- c(missing, "X09 (real wages/CPI)")
+    if (is.null(uploaded_files$rtisa)) missing <- c(missing, "RTISA (payroll/sector)")
+    if (length(missing) > 0) {
+      showNotification(
+        paste0("Proceeding without: ", paste(missing, collapse = ", "),
+               ". Those sections will show \u2014."),
+        type = "message", duration = 8
+      )
     }
     TRUE
   }
@@ -1295,13 +1344,15 @@ server <- function(input, output, session) {
   # manual download: word
   output$manual_download_word <- downloadHandler(
     filename = function() {
-      paste0("Labour_Market_Brief_Manual_", format(Sys.Date(), "%Y-%m-%d"), ".docx")
+      mm <- reference_manual_month()
+      label <- if (!is.null(mm) && nzchar(mm)) manual_month_to_display(mm) else format(Sys.Date(), "%B %Y")
+      paste0("Labour Market Stats Briefing - ", label, ".docx")
     },
     content = function(file) {
-      if (!has_uploads()) {
-        showNotification("Upload all 4 Excel files first", type = "warning")
+      if (is.null(uploaded_files$a01)) {
+        showNotification("Upload at least the A01 file first", type = "warning")
         doc <- officer::read_docx()
-        doc <- officer::body_add_par(doc, "Upload all 4 Excel files to generate.", style = "heading 1")
+        doc <- officer::body_add_par(doc, "Upload the A01 file to generate.", style = "heading 1")
         print(doc, target = file)
         return()
       }
@@ -1390,14 +1441,18 @@ server <- function(input, output, session) {
 
   # manual download: excel
   output$manual_download_excel <- downloadHandler(
-    filename = function() { "LM_Stats_Audit_Manual.xlsx" },
+    filename = function() {
+      mm <- reference_manual_month()
+      label <- if (!is.null(mm) && nzchar(mm)) manual_month_to_display(mm) else format(Sys.Date(), "%B %Y")
+      paste0("LM Stats Audit - ", label, ".xlsx")
+    },
     content = function(file) {
-      if (!has_uploads()) {
-        showNotification("Upload all 4 Excel files first", type = "warning")
+      if (is.null(uploaded_files$a01)) {
+        showNotification("Upload at least the A01 file first", type = "warning")
         if (requireNamespace("openxlsx", quietly = TRUE)) {
           wb <- openxlsx::createWorkbook()
           openxlsx::addWorksheet(wb, "Error")
-          openxlsx::writeData(wb, "Error", data.frame(Error = "Upload all 4 Excel files to generate."))
+          openxlsx::writeData(wb, "Error", data.frame(Error = "Upload the A01 file to generate."))
           openxlsx::saveWorkbook(wb, file, overwrite = TRUE)
         }
         return()

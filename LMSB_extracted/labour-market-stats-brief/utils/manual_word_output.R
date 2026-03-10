@@ -113,11 +113,12 @@ replace_all <- function(doc, key, val) {
 
 fill_conditional <- function(doc, base, value_text, value_num, invert = FALSE, neutral = FALSE) {
   value_num <- suppressWarnings(as.numeric(value_num))
-  if (is.na(value_num)) value_num <- 0
 
   p <- n <- z <- ""
 
-  if (isTRUE(neutral)) {
+  if (is.na(value_num)) {
+    z <- "\u2014"
+  } else if (isTRUE(neutral)) {
     z <- value_text
   } else {
     if (value_num > 0) p <- value_text
@@ -266,6 +267,18 @@ generate_manual_word_output <- function(
   doc <- fill_conditional(doc, "qvzvacde",  fmt_exempt_change(sv("vac_de")),               0, neutral = TRUE)
   doc <- fill_conditional(doc, "qvzwnode",  .format_gbp_signed0(sv("wages_change_election")),     sv("wages_change_election"))
   doc <- fill_conditional(doc, "qvzwcpde",  .format_gbp_signed0(sv("wages_cpi_change_election")), sv("wages_cpi_change_election"))
+
+  # ---- clean up any unreplaced qvz placeholders ----
+  body_xml   <- doc$doc_obj$get()
+  ns         <- xml2::xml_ns(body_xml)
+  text_nodes <- xml2::xml_find_all(body_xml, ".//w:t", ns = ns)
+  for (node in text_nodes) {
+    txt <- xml2::xml_text(node)
+    if (grepl("qvz", txt, fixed = TRUE)) {
+      cleaned <- gsub("qvz[a-z0-9_]+", "\u2014", txt)
+      xml2::xml_text(node) <- cleaned
+    }
+  }
 
   # ---- write output ----
   print(doc, target = output_path)
