@@ -357,15 +357,15 @@ run_calculations_from_excel <- function(manual_month,
     wages_cpi_change_covid <- .cpi_change(win3, covid3_cpi)
     wages_cpi_change_election <- .cpi_change(win3, election3_cpi)
 
-    # vs Dec 2007 and vs 2019 average (for top ten narrative)
+    # vs Dec 2007 and vs pre-pandemic (Dec 2019-Feb 2020, matching DB path)
     dec2007_val <- .val_by_date(cpi_months, cpi_real, as.Date("2007-12-01"))
     cur_cpi_real <- .avg_by_dates(cpi_months, cpi_real, win3)
     wages_cpi_total_vs_dec2007 <- if (!is.na(cur_cpi_real) && !is.na(dec2007_val) && dec2007_val != 0) {
       ((cur_cpi_real - dec2007_val) / dec2007_val) * 100
     } else NA_real_
 
-    pandemic_months <- seq(as.Date("2019-01-01"), as.Date("2019-12-01"), by = "month")
-    pandemic_avg <- .avg_by_dates(cpi_months, cpi_real, pandemic_months)
+    pandemic3 <- as.Date(c("2019-12-01", "2020-01-01", "2020-02-01"))
+    pandemic_avg <- .avg_by_dates(cpi_months, cpi_real, pandemic3)
     wages_cpi_total_vs_pandemic <- if (!is.na(cur_cpi_real) && !is.na(pandemic_avg) && pandemic_avg != 0) {
       ((cur_cpi_real - pandemic_avg) / pandemic_avg) * 100
     } else NA_real_
@@ -523,6 +523,10 @@ run_calculations_from_excel <- function(manual_month,
     .read_sheet(file_rtisa, "23. Employees (Industry)")
   } else data.frame()
 
+  # Sector payroll uses cm-1 anchor (not cm-2 like LFS), matching DB path
+  # RTISA sector data has less lag than LFS
+  sec_anchor <- cm %m-% months(1)
+
   if (nrow(rtisa_sec) > 0 && ncol(rtisa_sec) >= 18) {
     sec_text <- trimws(as.character(rtisa_sec[[1]]))
     sec_parsed <- suppressWarnings(lubridate::parse_date_time(sec_text, orders = c("B Y", "bY", "BY")))
@@ -533,9 +537,9 @@ run_calculations_from_excel <- function(manual_month,
     sec_health <- suppressWarnings(as.numeric(gsub("[^0-9.-]", "", as.character(rtisa_sec[[18]]))))
 
     .sector_full <- function(vals) {
-      now   <- .val_by_date(sec_months, vals, anchor_m)
-      prev  <- .val_by_date(sec_months, vals, anchor_m %m-% months(1))
-      yago  <- .val_by_date(sec_months, vals, anchor_m %m-% months(12))
+      now   <- .val_by_date(sec_months, vals, sec_anchor)
+      prev  <- .val_by_date(sec_months, vals, sec_anchor %m-% months(1))
+      yago  <- .val_by_date(sec_months, vals, sec_anchor %m-% months(12))
       covid <- .val_by_date(sec_months, vals, as.Date("2020-02-01"))
       elec  <- .val_by_date(sec_months, vals, as.Date("2024-06-01"))
       list(
@@ -623,7 +627,7 @@ run_calculations_from_excel <- function(manual_month,
   vacancies_period_label <- lfs_label_narrative(vac_end)
   vacancies_period_short_label <- make_lfs_label(vac_end)
   payroll_flash_label_val <- format(flash_anchor, "%B %Y")
-  sector_month_label <- format(anchor_m, "%B %Y")
+  sector_month_label <- format(sec_anchor, "%B %Y")
 
   assign("lfs_period_label",             lfs_period_label,             envir = target_env)
   assign("lfs_period_short_label",       lfs_period_short_label,       envir = target_env)
