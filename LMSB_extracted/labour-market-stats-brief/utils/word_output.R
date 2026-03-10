@@ -89,10 +89,26 @@ manual_month_to_label <- function(x) {
 }
 
 # word replacement helpers
+# Direct XML manipulation to reliably replace text inside table cells.
+# officer::body_replace_all_text may miss table-cell text in some versions.
 replace_all <- function(doc, key, val) {
   if (is.null(val) || length(val) == 0 || is.na(val)) val <- ""
   val <- as.character(val)
-  doc <- body_replace_all_text(doc, key, val, fixed = TRUE)
+
+  # direct XML: find and replace in ALL w:t nodes (body paragraphs + table cells)
+  body_xml <- doc$doc_obj$get()
+  ns <- xml2::xml_ns(body_xml)
+  text_nodes <- xml2::xml_find_all(body_xml, ".//w:t", ns = ns)
+  for (node in text_nodes) {
+    txt <- xml2::xml_text(node)
+    if (grepl(key, txt, fixed = TRUE)) {
+      new_txt <- gsub(key, val, txt, fixed = TRUE)
+      xml2::xml_text(node) <- new_txt
+      xml2::xml_attr(node, "xml:space") <- "preserve"
+    }
+  }
+
+  # headers / footers via officer (tables are unlikely in these)
   doc <- tryCatch(headers_replace_all_text(doc, key, val, fixed = TRUE), error = function(e) doc)
   doc <- tryCatch(footers_replace_all_text(doc, key, val, fixed = TRUE), error = function(e) doc)
   doc
