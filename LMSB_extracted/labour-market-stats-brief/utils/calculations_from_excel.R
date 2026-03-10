@@ -141,6 +141,8 @@ run_calculations_from_excel <- function(manual_month = NULL,
                                          file_hr1 = NULL,
                                          file_x09 = NULL,
                                          file_rtisa = NULL,
+                                         vac_end_override = NULL,
+                                         payroll_end_override = NULL,
                                          target_env = globalenv()) {
 
   # Auto-detect reference month from A01 if not provided
@@ -426,8 +428,8 @@ run_calculations_from_excel <- function(manual_month = NULL,
 
   tbl_19 <- if (!is.null(file_a01)) .read_sheet(file_a01, "19") else data.frame()
 
-  # Vacancies: use LFS-aligned period for dashboard consistency
-  vac_end <- lfs_end_cur  # e.g. Dec 2025 → "Oct-Dec 2025" for Feb 2026 release
+  # Vacancies: use override if provided, otherwise LFS-aligned
+  vac_end <- if (!is.null(vac_end_override)) vac_end_override else lfs_end_cur
   vac_lab_cur   <- .lfs_label(vac_end)
   vac_lab_q     <- .lfs_label(vac_end %m-% months(3))
   vac_lab_y     <- .lfs_label(vac_end %m-% months(12))
@@ -503,8 +505,12 @@ run_calculations_from_excel <- function(manual_month = NULL,
     pay_df <- pay_df[!is.na(pay_df$m) & !is.na(pay_df$v), ]
     pay_df <- pay_df[order(pay_df$m), ]
 
-    # Use latest available date in RTISA file (self-anchoring)
-    rtisa_latest <- if (nrow(pay_df) > 0) pay_df$m[nrow(pay_df)] else anchor_m
+    # Use override if provided, otherwise latest available date in RTISA file
+    rtisa_latest <- if (!is.null(payroll_end_override) && payroll_end_override %in% pay_df$m) {
+      payroll_end_override
+    } else if (nrow(pay_df) > 0) {
+      pay_df$m[nrow(pay_df)]
+    } else anchor_m
     rtisa_cm <- rtisa_latest %m+% months(2)  # equivalent of cm for this file's data
 
     # 3-month averages aligned to this file's latest data

@@ -414,7 +414,8 @@ ui <- fluidPage(
       }
 
       /* Ensure Shiny selectInput matches GOV.UK style */
-      # vacancies_period, #payroll_period {
+      #vacancies_period, #payroll_period,
+      #manual_vacancies_period, #manual_payroll_period {
         font-size: 19px;
         width: 100%;
         max-width: 320px;
@@ -424,7 +425,8 @@ ui <- fluidPage(
         border-radius: 0;
         background-color: #ffffff;
       }
-      # vacancies_period:focus, #payroll_period:focus {
+      #vacancies_period:focus, #payroll_period:focus,
+      #manual_vacancies_period:focus, #manual_payroll_period:focus {
         outline: 3px solid #ffdd00;
         outline-offset: 0;
         box-shadow: inset 0 0 0 2px;
@@ -553,6 +555,17 @@ ui <- fluidPage(
                                 ),
 
                                 uiOutput("upload_status"),
+
+                                div(class = "input-row",
+                                    div(class = "govuk-form-group",
+                                        tags$label(class = "govuk-label", `for` = "manual_vacancies_period", "Vacancies"),
+                                        selectInput("manual_vacancies_period", label = NULL, choices = c("Upload A01 first" = ""), selected = "")
+                                    ),
+                                    div(class = "govuk-form-group",
+                                        tags$label(class = "govuk-label", `for` = "manual_payroll_period", "Payroll employees"),
+                                        selectInput("manual_payroll_period", label = NULL, choices = c("Upload RTISA first" = ""), selected = "")
+                                    )
+                                ),
 
                                 tags$hr(class = "govuk-section-break"),
 
@@ -740,8 +753,124 @@ server <- function(input, output, session) {
 
     div(style = "margin-top: 10px;", tagList(tags), month_line)
   })
-  
+
+  # Detect vacancies periods from A01 and populate manual dropdown
+  observeEvent(uploaded_files$a01, {
+    path <- uploaded_files$a01
+    if (is.null(path)) return()
+
+    tryCatch({
+      mm <- reference_manual_month()
+      if (is.null(mm) || !nzchar(mm)) return()
+
+      mm_mon3 <- substr(gsub("[^a-z]", "", mm), 1, 3)
+      mm_yr   <- as.integer(substr(gsub("[^0-9]", "", mm), 1, 4))
+      mm_m    <- match(mm_mon3, tolower(month.abb))
+      mm_date <- as.Date(sprintf("%04d-%02d-01", mm_yr, mm_m))
+      lfs_end <- add_months(mm_date, -2)
+
+      tbl_19 <- readxl::read_excel(path, sheet = "19", col_names = FALSE, .name_repair = "minimal")
+      periods <- trimws(as.character(tbl_19[[1]]))
+      # Parse "Mmm-Mmm YYYY" labels to get end dates
+      parsed <- vapply(periods, function(x) {
+        m <- regmatches(x, gregexpr("[A-Za-z]{3}", x))[[1]]
+        y <- regmatches(x, gregexpr("[0-9]{4}", x))[[1]]
+        if (length(m) >= 2 && length(y) >= 1) {
+          month_map <- c(jan=1,feb=2,mar=3,apr=4,may=5,jun=6,jul=7,aug=8,sep=9,oct=10,nov=11,dec=12)
+          em <- month_map[tolower(m[2])]
+          if (!is.na(em)) return(as.numeric(as.Date(sprintf("%s-%02d-01", y[1], em))))
+        }
+        NA_real_
+      }, numeric(1))
+
+      ok <- !is.na(parsed) & !is.na(suppressWarnings(as.numeric(tbl_19[[3]])))
+      if (!any(ok)) return()
+
+      ends <- as.Date(parsed[ok], origin = "1970-01-01")
+      end_latest <- max(ends)
+      aligned_candidates <- ends[ends <= lfs_end]
+      end_aligned <- if (length(aligned_candidates) > 0) max(aligned_candidates) else end_latest
+
+      make_label <- function(end_d) {
+        start_d <- add_months(end_d, -2)
+        paste0(format(start_d, "%b"), "-", format(end_d, "%b"), " ", format(end_d, "%Y"))
+      }
+
+      lab_aligned <- make_label(end_aligned)
+      lab_latest  <- make_label(end_latest)
+
+      manual_period_labels$vac_aligned <- lab_aligned
+      manual_period_labels$vac_latest  <- lab_latest
+
+      if (identical(lab_aligned, lab_latest)) {
+        choices <- setNames(lab_latest, paste0(lab_latest, " (only period)"))
+      } else {
+        choices <- setNames(
+          c(lab_latest, lab_aligned),
+          c(paste0(lab_latest, " (default)"), lab_aligned)
+        )
+      }
+      updateSelectInput(session, "manual_vacancies_period", choices = choices, selected = choices[1])
+    }, error = function(e) NULL)
+  })
+
+  # Detect payroll periods from RTISA and populate manual dropdown
+  observeEvent(uploaded_files$rtisa, {
+    path <- uploaded_files$rtisa
+    if (is.null(path)) return()
+
+    tryCatch({
+      mm <- reference_manual_month()
+      if (is.null(mm) || !nzchar(mm)) return()
+
+      mm_mon3 <- substr(gsub("[^a-z]", "", mm), 1, 3)
+      mm_yr   <- as.integer(substr(gsub("[^0-9]", "", mm), 1, 4))
+      mm_m    <- match(mm_mon3, tolower(month.abb))
+      mm_date <- as.Date(sprintf("%04d-%02d-01", mm_yr, mm_m))
+      lfs_end <- add_months(mm_date, -2)
+
+      rtisa_pay <- readxl::read_excel(path, sheet = "1. Payrolled employees (UK)", col_names = FALSE, .name_repair = "minimal")
+      text_col <- trimws(as.character(rtisa_pay[[1]]))
+      parsed <- suppressWarnings(lubridate::parse_date_time(text_col, orders = c("B Y", "bY", "BY")))
+      months_parsed <- lubridate::floor_date(as.Date(parsed), "month")
+      vals <- suppressWarnings(as.numeric(gsub("[^0-9.-]", "", as.character(rtisa_pay[[2]]))))
+
+      ok <- !is.na(months_parsed) & !is.na(vals)
+      if (!any(ok)) return()
+
+      avail <- months_parsed[ok]
+      end_latest <- max(avail)
+      aligned_candidates <- avail[avail <= lfs_end]
+      end_aligned <- if (length(aligned_candidates) > 0) max(aligned_candidates) else end_latest
+
+      make_label <- function(end_d) {
+        start_d <- add_months(end_d, -2)
+        paste0(format(start_d, "%b"), "-", format(end_d, "%b"), " ", format(end_d, "%Y"))
+      }
+
+      lab_aligned <- make_label(end_aligned)
+      lab_latest  <- make_label(end_latest)
+
+      manual_period_labels$pay_aligned <- lab_aligned
+      manual_period_labels$pay_latest  <- lab_latest
+
+      if (identical(lab_aligned, lab_latest)) {
+        choices <- setNames(lab_latest, paste0(lab_latest, " (only period)"))
+      } else {
+        choices <- setNames(
+          c(lab_aligned, lab_latest),
+          c(paste0(lab_aligned, " (default)"), lab_latest)
+        )
+      }
+      updateSelectInput(session, "manual_payroll_period", choices = choices, selected = choices[1])
+    }, error = function(e) NULL)
+  })
+
   reference_manual_month <- reactiveVal(NULL)
+  manual_period_labels <- reactiveValues(
+    vac_aligned = NULL, vac_latest = NULL,
+    pay_aligned = NULL, pay_latest = NULL
+  )
   period_labels <- reactiveVal(list(
     vac = list(aligned = NULL, latest = NULL),
     payroll = list(aligned = NULL, latest = NULL)
@@ -785,6 +914,14 @@ server <- function(input, output, session) {
   
   mode_from_choice <- function(choice, labs) {
     if (!is.null(labs$latest) && identical(choice, labs$latest)) "latest" else "aligned"
+  }
+
+  # Parse a manual dropdown label ("Mmm-Mmm YYYY") to its end-month Date, or NULL
+  .parse_period_end <- function(label) {
+    if (is.null(label) || !nzchar(label)) return(NULL)
+    d <- parse_lfs_end(label)
+    if (is.na(d)) return(NULL)
+    d
   }
 
   # Update reference month reactive from auto-detected value
@@ -1300,6 +1437,8 @@ server <- function(input, output, session) {
         manual_month = NULL,
         file_a01 = uploaded_files$a01, file_hr1 = uploaded_files$hr1,
         file_x09 = uploaded_files$x09, file_rtisa = uploaded_files$rtisa,
+        vac_end_override = .parse_period_end(input$manual_vacancies_period),
+        payroll_end_override = .parse_period_end(input$manual_payroll_period),
         target_env = calc_env
       )
       .update_ref_month(detected_mm)
@@ -1352,6 +1491,8 @@ server <- function(input, output, session) {
         manual_month = NULL,
         file_a01 = uploaded_files$a01, file_hr1 = uploaded_files$hr1,
         file_x09 = uploaded_files$x09, file_rtisa = uploaded_files$rtisa,
+        vac_end_override = .parse_period_end(input$manual_vacancies_period),
+        payroll_end_override = .parse_period_end(input$manual_payroll_period),
         target_env = globalenv()
       )
       manual_month <<- detected_mm
@@ -1406,6 +1547,8 @@ server <- function(input, output, session) {
             manual_month = NULL,
             file_a01 = uploaded_files$a01, file_hr1 = uploaded_files$hr1,
             file_x09 = uploaded_files$x09, file_rtisa = uploaded_files$rtisa,
+            vac_end_override = .parse_period_end(input$manual_vacancies_period),
+            payroll_end_override = .parse_period_end(input$manual_payroll_period),
             target_env = globalenv()
           )
           manual_month <<- detected_mm
@@ -1504,6 +1647,8 @@ server <- function(input, output, session) {
             manual_month = NULL,
             file_a01 = uploaded_files$a01, file_hr1 = uploaded_files$hr1,
             file_x09 = uploaded_files$x09, file_rtisa = uploaded_files$rtisa,
+            vac_end_override = .parse_period_end(input$manual_vacancies_period),
+            payroll_end_override = .parse_period_end(input$manual_payroll_period),
             target_env = globalenv()
           )
           manual_month <<- detected_mm
