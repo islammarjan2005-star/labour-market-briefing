@@ -141,7 +141,7 @@ sv <- function(name, default = NA_real_) {
 # ---------- main ----------
 
 generate_manual_word_output <- function(
-    manual_month,
+    manual_month = NULL,
     file_a01  = NULL,
     file_x09  = NULL,
     file_rtisa = NULL,
@@ -151,12 +151,12 @@ generate_manual_word_output <- function(
     verbose = TRUE
 ) {
 
-  manual_month <- tolower(manual_month)
+  if (!is.null(manual_month)) manual_month <- tolower(manual_month)
 
-  # source helpers and run Excel calculations
+  # source helpers and run Excel calculations (auto-detects month from A01 if NULL)
   source("utils/helpers.R", local = FALSE)
   source("utils/calculations_from_excel.R", local = FALSE)
-  run_calculations_from_excel(manual_month,
+  manual_month <- run_calculations_from_excel(manual_month,
                               file_a01 = file_a01, file_hr1 = file_hr1,
                               file_x09 = file_x09, file_rtisa = file_rtisa)
 

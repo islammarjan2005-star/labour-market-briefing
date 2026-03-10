@@ -110,16 +110,46 @@ if (!exists("parse_manual_month", inherits = TRUE)) {
   fallback_col
 }
 
+# Auto-detect reference month from A01 Sheet "1" period labels
+.detect_manual_month_from_a01 <- function(file_a01) {
+  if (is.null(file_a01)) return(NULL)
+  tbl <- .read_sheet(file_a01, "1")
+  if (nrow(tbl) == 0 || ncol(tbl) == 0) return(NULL)
+
+  col1 <- trimws(as.character(tbl[[1]]))
+  lfs_pat <- "^(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)-(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\\s+(\\d{4})$"
+  hits <- grep(lfs_pat, col1, ignore.case = TRUE)
+  if (length(hits) == 0) return(NULL)
+
+  last_label <- col1[hits[length(hits)]]
+  parts <- regmatches(last_label, regexec(lfs_pat, last_label, ignore.case = TRUE))[[1]]
+  end_mon <- match(tools::toTitleCase(tolower(parts[3])), month.abb)
+  end_yr  <- as.integer(parts[4])
+  if (is.na(end_mon) || is.na(end_yr)) return(NULL)
+
+  lfs_end <- as.Date(sprintf("%04d-%02d-01", end_yr, end_mon))
+  cm_date <- lfs_end %m+% months(2)
+  tolower(paste0(format(cm_date, "%b"), format(cm_date, "%Y")))
+}
+
 # ============================================================================
 # MAIN FUNCTION
 # ============================================================================
 
-run_calculations_from_excel <- function(manual_month,
+run_calculations_from_excel <- function(manual_month = NULL,
                                          file_a01 = NULL,
                                          file_hr1 = NULL,
                                          file_x09 = NULL,
                                          file_rtisa = NULL,
                                          target_env = globalenv()) {
+
+  # Auto-detect reference month from A01 if not provided
+  if (is.null(manual_month)) {
+    manual_month <- .detect_manual_month_from_a01(file_a01)
+    if (is.null(manual_month)) {
+      stop("Cannot detect reference period from A01 file. Check Sheet '1' has LFS period labels.", call. = FALSE)
+    }
+  }
 
   cm <- parse_manual_month(manual_month)      # e.g. 2026-02-01 for "feb2026"
   anchor_m <- cm %m-% months(2)               # e.g. 2025-12-01 (LFS end month)
@@ -337,8 +367,12 @@ run_calculations_from_excel <- function(manual_month,
     cpi_total  <- suppressWarnings(as.numeric(gsub("[^0-9.-]", "", as.character(tbl_cpi[[5]]))))
     cpi_reg    <- suppressWarnings(as.numeric(gsub("[^0-9.-]", "", as.character(tbl_cpi[[9]]))))
 
-    latest_wages_cpi   <- .val_by_date(cpi_months, cpi_total, anchor_m)
-    latest_regular_cpi <- .val_by_date(cpi_months, cpi_reg, anchor_m)
+    # Use latest available date in X09 file (self-anchoring)
+    cpi_valid <- which(!is.na(cpi_months) & !is.na(cpi_total))
+    cpi_anchor <- if (length(cpi_valid) > 0) cpi_months[cpi_valid[length(cpi_valid)]] else anchor_m
+
+    latest_wages_cpi   <- .val_by_date(cpi_months, cpi_total, cpi_anchor)
+    latest_regular_cpi <- .val_by_date(cpi_months, cpi_reg, cpi_anchor)
 
     # £ changes for dashboard
     .cpi_change <- function(a_months, b_months) {
@@ -347,19 +381,20 @@ run_calculations_from_excel <- function(manual_month,
       if (is.na(a) || is.na(b)) NA_real_ else (a - b) * 52
     }
 
-    prev3_cpi <- c(anchor_m %m-% months(3), anchor_m %m-% months(4), anchor_m %m-% months(5))
-    yago3_cpi <- win3 %m-% months(12)
+    cpi_win3 <- c(cpi_anchor, cpi_anchor %m-% months(1), cpi_anchor %m-% months(2))
+    prev3_cpi <- c(cpi_anchor %m-% months(3), cpi_anchor %m-% months(4), cpi_anchor %m-% months(5))
+    yago3_cpi <- cpi_win3 %m-% months(12)
     covid3_cpi <- as.Date(c("2019-12-01", "2020-01-01", "2020-02-01"))
     election3_cpi <- as.Date(c("2024-04-01", "2024-05-01", "2024-06-01"))
 
-    wages_cpi_change_q <- .cpi_change(win3, prev3_cpi)
-    wages_cpi_change_y <- .cpi_change(win3, yago3_cpi)
-    wages_cpi_change_covid <- .cpi_change(win3, covid3_cpi)
-    wages_cpi_change_election <- .cpi_change(win3, election3_cpi)
+    wages_cpi_change_q <- .cpi_change(cpi_win3, prev3_cpi)
+    wages_cpi_change_y <- .cpi_change(cpi_win3, yago3_cpi)
+    wages_cpi_change_covid <- .cpi_change(cpi_win3, covid3_cpi)
+    wages_cpi_change_election <- .cpi_change(cpi_win3, election3_cpi)
 
     # vs Dec 2007 and vs pre-pandemic (Dec 2019-Feb 2020, matching DB path)
     dec2007_val <- .val_by_date(cpi_months, cpi_real, as.Date("2007-12-01"))
-    cur_cpi_real <- .avg_by_dates(cpi_months, cpi_real, win3)
+    cur_cpi_real <- .avg_by_dates(cpi_months, cpi_real, cpi_win3)
     wages_cpi_total_vs_dec2007 <- if (!is.na(cur_cpi_real) && !is.na(dec2007_val) && dec2007_val != 0) {
       ((cur_cpi_real - dec2007_val) / dec2007_val) * 100
     } else NA_real_
@@ -468,9 +503,13 @@ run_calculations_from_excel <- function(manual_month,
     pay_df <- pay_df[!is.na(pay_df$m) & !is.na(pay_df$v), ]
     pay_df <- pay_df[order(pay_df$m), ]
 
-    # 3-month averages aligned to LFS quarter
-    months_cur  <- c(cm %m-% months(4), cm %m-% months(3), cm %m-% months(2))
-    months_prev <- c(cm %m-% months(7), cm %m-% months(6), cm %m-% months(5))
+    # Use latest available date in RTISA file (self-anchoring)
+    rtisa_latest <- if (nrow(pay_df) > 0) pay_df$m[nrow(pay_df)] else anchor_m
+    rtisa_cm <- rtisa_latest %m+% months(2)  # equivalent of cm for this file's data
+
+    # 3-month averages aligned to this file's latest data
+    months_cur  <- c(rtisa_cm %m-% months(4), rtisa_cm %m-% months(3), rtisa_cm %m-% months(2))
+    months_prev <- c(rtisa_cm %m-% months(7), rtisa_cm %m-% months(6), rtisa_cm %m-% months(5))
     months_yago <- months_cur %m-% months(12)
 
     pay_cur_raw <- .avg_by_dates(pay_df$m, pay_df$v, months_cur)
@@ -487,11 +526,11 @@ run_calculations_from_excel <- function(manual_month,
     elec_base <- .avg_by_dates(pay_df$m, pay_df$v, as.Date(c("2024-04-01", "2024-05-01", "2024-06-01")))
     payroll_de <- if (!is.na(payroll_cur) && !is.na(elec_base)) payroll_cur - (elec_base / 1000) else NA_real_
 
-    # Flash (single latest month)
-    flash_anchor <- anchor_m
-    flash_val    <- .val_by_date(pay_df$m, pay_df$v, anchor_m)
-    flash_prev_m <- .val_by_date(pay_df$m, pay_df$v, anchor_m %m-% months(1))
-    flash_prev_y <- .val_by_date(pay_df$m, pay_df$v, anchor_m %m-% months(12))
+    # Flash (single latest month — use RTISA's own latest date)
+    flash_anchor <- rtisa_latest
+    flash_val    <- .val_by_date(pay_df$m, pay_df$v, rtisa_latest)
+    flash_prev_m <- .val_by_date(pay_df$m, pay_df$v, rtisa_latest %m-% months(1))
+    flash_prev_y <- .val_by_date(pay_df$m, pay_df$v, rtisa_latest %m-% months(12))
     flash_elec   <- .val_by_date(pay_df$m, pay_df$v, as.Date("2024-06-01"))
 
     payroll_flash_cur <- if (!is.na(flash_val)) flash_val / 1e6 else NA_real_
@@ -523,9 +562,7 @@ run_calculations_from_excel <- function(manual_month,
     .read_sheet(file_rtisa, "23. Employees (Industry)")
   } else data.frame()
 
-  # Sector payroll uses cm-1 anchor (not cm-2 like LFS), matching DB path
-  # RTISA sector data has less lag than LFS
-  sec_anchor <- cm %m-% months(1)
+  # Sector payroll — self-anchoring from latest date in sector data
 
   if (nrow(rtisa_sec) > 0 && ncol(rtisa_sec) >= 18) {
     sec_text <- trimws(as.character(rtisa_sec[[1]]))
@@ -535,6 +572,10 @@ run_calculations_from_excel <- function(manual_month,
     sec_retail <- suppressWarnings(as.numeric(gsub("[^0-9.-]", "", as.character(rtisa_sec[[8]]))))
     sec_hosp   <- suppressWarnings(as.numeric(gsub("[^0-9.-]", "", as.character(rtisa_sec[[10]]))))
     sec_health <- suppressWarnings(as.numeric(gsub("[^0-9.-]", "", as.character(rtisa_sec[[18]]))))
+
+    # Use latest available date in sector data (self-anchoring)
+    sec_valid <- which(!is.na(sec_months) & !is.na(sec_retail))
+    sec_anchor <- if (length(sec_valid) > 0) sec_months[sec_valid[length(sec_valid)]] else cm %m-% months(1)
 
     .sector_full <- function(vals) {
       now   <- .val_by_date(sec_months, vals, sec_anchor)
@@ -664,5 +705,5 @@ run_calculations_from_excel <- function(manual_month,
     anchor = anchor_m
   ), envir = target_env)
 
-  invisible(TRUE)
+  invisible(manual_month)
 }

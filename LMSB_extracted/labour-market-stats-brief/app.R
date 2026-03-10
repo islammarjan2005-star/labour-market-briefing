@@ -710,7 +710,20 @@ server <- function(input, output, session) {
   mode_from_choice <- function(choice, labs) {
     if (!is.null(labs$latest) && identical(choice, labs$latest)) "latest" else "aligned"
   }
-  
+
+  # Update reference month reactive from auto-detected value
+  .update_ref_month <- function(detected_mm) {
+    old_mm <- reference_manual_month()
+    reference_manual_month(detected_mm)
+    if (!is.null(old_mm) && nzchar(old_mm) && !identical(tolower(old_mm), tolower(detected_mm))) {
+      showNotification(
+        paste0("Reference month auto-detected: ", manual_month_to_display(detected_mm),
+               " (from uploaded A01)"),
+        type = "message", duration = 8
+      )
+    }
+  }
+
   # auto detect ref month + dropdownn
   session$onFlushed(function() {
     
@@ -1190,24 +1203,23 @@ server <- function(input, output, session) {
   observeEvent(input$manual_preview_dashboard, {
     if (!.check_manual_ready()) return()
 
-    withProgress(message = "Loading Dashboard (Excel)", value = 0, {
+    withProgress(message = "Loading Dashboard (Manual Upload)", value = 0, {
 
       incProgress(0.1, detail = "Reading Excel files...")
 
       calc_env <- new.env(parent = globalenv())
-      mm <- reference_manual_month()
-      if (!is.null(mm) && nzchar(mm)) calc_env$manual_month <- tolower(mm)
 
       incProgress(0.3, detail = "Running calculations...")
 
       source(excel_calc_path, local = calc_env)
       source("utils/helpers.R", local = calc_env)
-      calc_env$run_calculations_from_excel(
-        manual_month = calc_env$manual_month,
+      detected_mm <- calc_env$run_calculations_from_excel(
+        manual_month = NULL,
         file_a01 = uploaded_files$a01, file_hr1 = uploaded_files$hr1,
         file_x09 = uploaded_files$x09, file_rtisa = uploaded_files$rtisa,
         target_env = calc_env
       )
+      .update_ref_month(detected_mm)
 
       incProgress(0.4, detail = "Building metrics table...")
 
@@ -1238,30 +1250,29 @@ server <- function(input, output, session) {
       dashboard_data(metrics)
     })
 
-    showNotification("Dashboard loaded (Excel mode)", type = "message", duration = 3)
+    showNotification("Dashboard loaded (Manual Upload)", type = "message", duration = 3)
   })
 
   # manual preview: top ten
   observeEvent(input$manual_preview_topten, {
     if (!.check_manual_ready()) return()
 
-    withProgress(message = "Loading Top Ten (Excel)", value = 0, {
+    withProgress(message = "Loading Top Ten (Manual Upload)", value = 0, {
 
       incProgress(0.2, detail = "Running Excel calculations...")
 
       if (file.exists(config_path)) source(config_path, local = FALSE)
       source("utils/helpers.R", local = FALSE)
 
-      mm <- reference_manual_month()
-      if (!is.null(mm) && nzchar(mm)) manual_month <<- tolower(mm)
-
       source(excel_calc_path, local = FALSE)
-      run_calculations_from_excel(
-        manual_month = manual_month,
+      detected_mm <- run_calculations_from_excel(
+        manual_month = NULL,
         file_a01 = uploaded_files$a01, file_hr1 = uploaded_files$hr1,
         file_x09 = uploaded_files$x09, file_rtisa = uploaded_files$rtisa,
         target_env = globalenv()
       )
+      manual_month <<- detected_mm
+      .update_ref_month(detected_mm)
 
       incProgress(0.5, detail = "Generating top ten stats...")
 
@@ -1278,7 +1289,7 @@ server <- function(input, output, session) {
       incProgress(0.3, detail = "Done")
     })
 
-    showNotification("Top Ten loaded (Excel mode)", type = "message", duration = 3)
+    showNotification("Top Ten loaded (Manual Upload)", type = "message", duration = 3)
   })
 
   # manual download: word
@@ -1296,7 +1307,7 @@ server <- function(input, output, session) {
       }
 
       tryCatch({
-        withProgress(message = "Generating Word (Excel mode)", value = 0, {
+        withProgress(message = "Generating Word (Manual Upload)", value = 0, {
 
           incProgress(0.2, detail = "Loading scripts...")
 
@@ -1304,17 +1315,16 @@ server <- function(input, output, session) {
           source(excel_calc_path, local = FALSE)
           if (file.exists(config_path)) source(config_path, local = FALSE)
 
-          mm <- reference_manual_month()
-          if (!is.null(mm) && nzchar(mm)) manual_month <<- tolower(mm)
+          incProgress(0.3, detail = "Running calculations...")
 
-          incProgress(0.3, detail = "Running Excel calculations...")
-
-          run_calculations_from_excel(
-            manual_month = manual_month,
+          detected_mm <- run_calculations_from_excel(
+            manual_month = NULL,
             file_a01 = uploaded_files$a01, file_hr1 = uploaded_files$hr1,
             file_x09 = uploaded_files$x09, file_rtisa = uploaded_files$rtisa,
             target_env = globalenv()
           )
+          manual_month <<- detected_mm
+          .update_ref_month(detected_mm)
 
           incProgress(0.2, detail = "Generating summary & top ten...")
 
@@ -1363,19 +1373,17 @@ server <- function(input, output, session) {
           incProgress(0.1, detail = "Done")
         })
 
-        showNotification("Word document generated (Excel mode)", type = "message", duration = 3)
+        showNotification("Word document generated (Manual Upload)", type = "message", duration = 3)
 
       }, error = function(e) {
         message("Manual Word error: ", e$message)
-        showNotification(paste("Word error:", e$message), type = "error", duration = 5)
-        if (requireNamespace("officer", quietly = TRUE)) {
-          doc <- officer::read_docx()
-          doc <- officer::body_add_par(doc, "Error Generating Brief", style = "heading 1")
-          doc <- officer::body_add_par(doc, paste("Error:", e$message))
-          print(doc, target = file)
-        } else {
-          writeLines(paste("Error:", e$message), con = file)
-        }
+        showNotification(
+          paste("Word generation failed:", e$message),
+          type = "error", duration = 10
+        )
+        # Shiny downloadHandler requires a file; write a minimal placeholder
+        # so the browser doesn't hang, but the notification tells the user what happened
+        writeLines(paste("Generation failed:", e$message), con = file)
       })
     }
   )
@@ -1396,22 +1404,21 @@ server <- function(input, output, session) {
       }
 
       tryCatch({
-        withProgress(message = "Generating Excel (manual)", value = 0, {
+        withProgress(message = "Generating Excel (Manual Upload)", value = 0, {
           incProgress(0.2, detail = "Loading scripts...")
           source("utils/helpers.R", local = FALSE)
           source(excel_calc_path, local = FALSE)
           if (file.exists(config_path)) source(config_path, local = FALSE)
 
-          mm <- reference_manual_month()
-          if (!is.null(mm) && nzchar(mm)) manual_month <<- tolower(mm)
-
-          incProgress(0.4, detail = "Running Excel calculations...")
-          run_calculations_from_excel(
-            manual_month = manual_month,
+          incProgress(0.4, detail = "Running calculations...")
+          detected_mm <- run_calculations_from_excel(
+            manual_month = NULL,
             file_a01 = uploaded_files$a01, file_hr1 = uploaded_files$hr1,
             file_x09 = uploaded_files$x09, file_rtisa = uploaded_files$rtisa,
             target_env = globalenv()
           )
+          manual_month <<- detected_mm
+          .update_ref_month(detected_mm)
 
           incProgress(0.3, detail = "Building workbook...")
           excel_env <- new.env(parent = globalenv())
