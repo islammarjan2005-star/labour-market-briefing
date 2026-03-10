@@ -97,6 +97,19 @@ if (!exists("parse_manual_month", inherits = TRUE)) {
   x[length(x)]
 }
 
+# Find column index by searching header rows for an ONS dataset identifier code
+# Returns the column index, or fallback_col if not found
+.find_col_by_code <- function(tbl, code, fallback_col = NA_integer_, search_rows = 1:min(10, nrow(tbl))) {
+  if (nrow(tbl) == 0 || ncol(tbl) == 0) return(fallback_col)
+  for (r in search_rows) {
+    for (c in seq_len(ncol(tbl))) {
+      cell <- as.character(tbl[[c]][r])
+      if (!is.na(cell) && grepl(code, cell, fixed = TRUE)) return(c)
+    }
+  }
+  fallback_col
+}
+
 # ============================================================================
 # MAIN FUNCTION
 # ============================================================================
@@ -116,13 +129,13 @@ run_calculations_from_excel <- function(manual_month,
   lfs_end_q    <- anchor_m %m-% months(3)      # Sep 2025
   lfs_end_y    <- anchor_m %m-% months(12)     # Dec 2024
   lfs_end_covid <- as.Date("2020-02-01")       # Dec-Feb 2020
-  lfs_end_elec  <- as.Date("2024-06-01")       # Apr-Jun 2024
+  lfs_end_elec  <- as.Date("2024-06-01")        # Apr-Jun 2024
 
   lab_cur   <- .lfs_label(lfs_end_cur)   # "Oct-Dec 2025"
   lab_q     <- .lfs_label(lfs_end_q)     # "Jul-Sep 2025"
   lab_y     <- .lfs_label(lfs_end_y)     # "Oct-Dec 2024"
   lab_covid <- .lfs_label(lfs_end_covid) # "Dec-Feb 2020"
-  lab_elec  <- .lfs_label(lfs_end_elec)  # "May-Jul 2024"
+  lab_elec  <- .lfs_label(lfs_end_elec)  # "Apr-Jun 2024"
 
   # ==========================================================================
   # A01 — Sheet "1": Main LFS summary
@@ -222,7 +235,7 @@ run_calculations_from_excel <- function(manual_month,
     prev3 <- c(anchor_m %m-% months(3), anchor_m %m-% months(4), anchor_m %m-% months(5))
     yago3 <- win3 %m-% months(12)
     covid3 <- as.Date(c("2019-12-01", "2020-01-01", "2020-02-01"))
-    election3 <- as.Date(c("2024-05-01", "2024-06-01", "2024-07-01"))
+    election3 <- as.Date(c("2024-04-01", "2024-05-01", "2024-06-01"))
 
     .wage_change <- function(a_months, b_months) {
       a <- .avg_by_dates(w13_dates, w13_weekly, a_months)
@@ -264,11 +277,38 @@ run_calculations_from_excel <- function(manual_month,
     wages_reg_qchange <- NA_real_
   }
 
-  # Public/private not available from A01 directly
-  wages_total_public  <- NA_real_
-  wages_total_private <- NA_real_
-  wages_reg_public    <- NA_real_
-  wages_reg_private   <- NA_real_
+  # Public/private sector wages from A01 sheets 13 and 15
+  # Dynamic column search by ONS code, with hardcoded fallbacks
+  # Sheet 13 (total pay): KAC9 = public YoY%, KAC6 = private YoY%
+  # Sheet 15 (regular pay): KAJ7 = public YoY%, KAJ4 = private YoY%
+
+  if (nrow(tbl_13) > 0 && ncol(tbl_13) >= 10 && exists("w13_dates")) {
+    col_pub_total  <- .find_col_by_code(tbl_13, "KAC9", fallback_col = 10L)
+    col_priv_total <- .find_col_by_code(tbl_13, "KAC6", fallback_col = 7L)
+
+    w13_pub_pct  <- suppressWarnings(as.numeric(gsub("[^0-9.-]", "", as.character(tbl_13[[col_pub_total]]))))
+    w13_priv_pct <- suppressWarnings(as.numeric(gsub("[^0-9.-]", "", as.character(tbl_13[[col_priv_total]]))))
+
+    wages_total_public  <- .val_by_date(w13_dates, w13_pub_pct, anchor_m)
+    wages_total_private <- .val_by_date(w13_dates, w13_priv_pct, anchor_m)
+  } else {
+    wages_total_public  <- NA_real_
+    wages_total_private <- NA_real_
+  }
+
+  if (nrow(tbl_15) > 0 && ncol(tbl_15) >= 10 && exists("w15_dates")) {
+    col_pub_reg  <- .find_col_by_code(tbl_15, "KAJ7", fallback_col = 10L)
+    col_priv_reg <- .find_col_by_code(tbl_15, "KAJ4", fallback_col = 7L)
+
+    w15_pub_pct  <- suppressWarnings(as.numeric(gsub("[^0-9.-]", "", as.character(tbl_15[[col_pub_reg]]))))
+    w15_priv_pct <- suppressWarnings(as.numeric(gsub("[^0-9.-]", "", as.character(tbl_15[[col_priv_reg]]))))
+
+    wages_reg_public  <- .val_by_date(w15_dates, w15_pub_pct, anchor_m)
+    wages_reg_private <- .val_by_date(w15_dates, w15_priv_pct, anchor_m)
+  } else {
+    wages_reg_public  <- NA_real_
+    wages_reg_private <- NA_real_
+  }
 
   assign("latest_wages",          latest_wages,          envir = target_env)
   assign("wages_change_q",        wages_change_q,        envir = target_env)
@@ -310,7 +350,7 @@ run_calculations_from_excel <- function(manual_month,
     prev3_cpi <- c(anchor_m %m-% months(3), anchor_m %m-% months(4), anchor_m %m-% months(5))
     yago3_cpi <- win3 %m-% months(12)
     covid3_cpi <- as.Date(c("2019-12-01", "2020-01-01", "2020-02-01"))
-    election3_cpi <- as.Date(c("2024-05-01", "2024-06-01", "2024-07-01"))
+    election3_cpi <- as.Date(c("2024-04-01", "2024-05-01", "2024-06-01"))
 
     wages_cpi_change_q <- .cpi_change(win3, prev3_cpi)
     wages_cpi_change_y <- .cpi_change(win3, yago3_cpi)
@@ -492,34 +532,37 @@ run_calculations_from_excel <- function(manual_month,
     sec_hosp   <- suppressWarnings(as.numeric(gsub("[^0-9.-]", "", as.character(rtisa_sec[[10]]))))
     sec_health <- suppressWarnings(as.numeric(gsub("[^0-9.-]", "", as.character(rtisa_sec[[18]]))))
 
-    .sector_dy <- function(vals) {
-      now  <- .val_by_date(sec_months, vals, anchor_m)
-      yago <- .val_by_date(sec_months, vals, anchor_m %m-% months(12))
-      if (!is.na(now) && !is.na(yago)) (now - yago) / 1000 else NA_real_
+    .sector_full <- function(vals) {
+      now   <- .val_by_date(sec_months, vals, anchor_m)
+      prev  <- .val_by_date(sec_months, vals, anchor_m %m-% months(1))
+      yago  <- .val_by_date(sec_months, vals, anchor_m %m-% months(12))
+      covid <- .val_by_date(sec_months, vals, as.Date("2020-02-01"))
+      elec  <- .val_by_date(sec_months, vals, as.Date("2024-06-01"))
+      list(
+        cur = if (!is.na(now)) now / 1000 else NA_real_,
+        dm  = if (!is.na(now) && !is.na(prev)) (now - prev) / 1000 else NA_real_,
+        dy  = if (!is.na(now) && !is.na(yago)) (now - yago) / 1000 else NA_real_,
+        dc  = if (!is.na(now) && !is.na(covid)) (now - covid) / 1000 else NA_real_,
+        de  = if (!is.na(now) && !is.na(elec)) (now - elec) / 1000 else NA_real_
+      )
     }
 
-    retail_dy <- .sector_dy(sec_retail)
-    hosp_dy   <- .sector_dy(sec_hosp)
-    health_dy <- .sector_dy(sec_health)
+    s_retail <- .sector_full(sec_retail)
+    s_hosp   <- .sector_full(sec_hosp)
+    s_health <- .sector_full(sec_health)
   } else {
-    retail_dy <- hosp_dy <- health_dy <- NA_real_
+    na_sector <- list(cur = NA_real_, dm = NA_real_, dy = NA_real_, dc = NA_real_, de = NA_real_)
+    s_retail <- s_hosp <- s_health <- na_sector
   }
 
-  assign("hosp_dy",   hosp_dy,   envir = target_env)
-  assign("hosp_dm",   NA_real_,  envir = target_env)
-  assign("hosp_cur",  NA_real_,  envir = target_env)
-  assign("hosp_dc",   NA_real_,  envir = target_env)
-  assign("hosp_de",   NA_real_,  envir = target_env)
-  assign("retail_dy", retail_dy, envir = target_env)
-  assign("retail_dm", NA_real_,  envir = target_env)
-  assign("retail_cur", NA_real_, envir = target_env)
-  assign("retail_dc", NA_real_,  envir = target_env)
-  assign("retail_de", NA_real_,  envir = target_env)
-  assign("health_dy", health_dy, envir = target_env)
-  assign("health_dm", NA_real_,  envir = target_env)
-  assign("health_cur", NA_real_, envir = target_env)
-  assign("health_dc", NA_real_,  envir = target_env)
-  assign("health_de", NA_real_,  envir = target_env)
+  for (prefix in c("hosp", "retail", "health")) {
+    s <- switch(prefix, hosp = s_hosp, retail = s_retail, health = s_health)
+    assign(paste0(prefix, "_cur"), s$cur, envir = target_env)
+    assign(paste0(prefix, "_dm"),  s$dm,  envir = target_env)
+    assign(paste0(prefix, "_dy"),  s$dy,  envir = target_env)
+    assign(paste0(prefix, "_dc"),  s$dc,  envir = target_env)
+    assign(paste0(prefix, "_de"),  s$de,  envir = target_env)
+  }
 
   # ==========================================================================
   # HR1 — Sheet "1a": Redundancy notifications
@@ -543,22 +586,32 @@ run_calculations_from_excel <- function(manual_month,
         hr1_vals[valid_hr1[length(valid_hr1) - 1]]
       } else NA_real_
       hr1_dm <- if (!is.na(hr1_cur) && !is.na(prev_hr1)) hr1_cur - prev_hr1 else NA_real_
+
+      # Year-on-year, vs COVID baseline, vs election
+      hr1_cur_date <- hr1_dates[last_hr1]
+      hr1_yago  <- .val_by_date(hr1_dates, hr1_vals, hr1_cur_date %m-% months(12))
+      hr1_covid <- .val_by_date(hr1_dates, hr1_vals, as.Date("2020-02-01"))
+      hr1_elec  <- .val_by_date(hr1_dates, hr1_vals, as.Date("2024-06-01"))
+
+      hr1_dy <- if (!is.na(hr1_cur) && !is.na(hr1_yago)) hr1_cur - hr1_yago else NA_real_
+      hr1_dc <- if (!is.na(hr1_cur) && !is.na(hr1_covid)) hr1_cur - hr1_covid else NA_real_
+      hr1_de <- if (!is.na(hr1_cur) && !is.na(hr1_elec)) hr1_cur - hr1_elec else NA_real_
     } else {
       hr1_cur <- NA_real_
-      hr1_dm <- NA_real_
+      hr1_dm <- hr1_dy <- hr1_dc <- hr1_de <- NA_real_
       hr1_month_label <- ""
     }
   } else {
     hr1_cur <- NA_real_
-    hr1_dm <- NA_real_
+    hr1_dm <- hr1_dy <- hr1_dc <- hr1_de <- NA_real_
     hr1_month_label <- ""
   }
 
   assign("hr1_cur", hr1_cur, envir = target_env)
   assign("hr1_dm",  hr1_dm,  envir = target_env)
-  assign("hr1_dy",  NA_real_, envir = target_env)
-  assign("hr1_dc",  NA_real_, envir = target_env)
-  assign("hr1_de",  NA_real_, envir = target_env)
+  assign("hr1_dy",  hr1_dy,  envir = target_env)
+  assign("hr1_dc",  hr1_dc,  envir = target_env)
+  assign("hr1_de",  hr1_de,  envir = target_env)
   assign("hr1_month_label", hr1_month_label, envir = target_env)
 
   # ==========================================================================
