@@ -429,6 +429,36 @@ ui <- fluidPage(
         outline-offset: 0;
         box-shadow: inset 0 0 0 2px;
       }
+
+      /* Two-column mode layout */
+      .mode-row {
+        display: flex;
+        gap: 20px;
+        margin-bottom: 20px;
+      }
+      .mode-col {
+        flex: 1;
+        min-width: 0;
+      }
+      .mode-col .dashboard-card {
+        height: 100%;
+        display: flex;
+        flex-direction: column;
+      }
+      .mode-col .dashboard-card__content {
+        flex: 1;
+      }
+      .mode-col--manual {
+        border-left: 3px solid #b1b4b6;
+        padding-left: 20px;
+      }
+      .govuk-tag--amber {
+        background-color: #f47738;
+      }
+      @media (max-width: 768px) {
+        .mode-row { flex-direction: column; }
+        .mode-col--manual { border-left: none; padding-left: 0; border-top: 3px solid #b1b4b6; padding-top: 20px; }
+      }
     "))
   ),
   
@@ -456,81 +486,91 @@ ui <- fluidPage(
                 
                 h1(class = "govuk-heading-xl", "Labour Market Statistics Brief Generator"),
                 
-                # configuration
-                div(class = "dashboard-card",
-                    div(class = "dashboard-card__header", "Configuration"),
-                    div(class = "dashboard-card__content",
-                        div(class = "input-row",
-                            div(class = "govuk-form-group",
-                                tags$label(class = "govuk-label", "Reference month"),
-                                div(class = "govuk-hint", "Auto-selected from latest available data"),
-                                uiOutput("month_status")
-                            ),
-                        )
-                    )
-                ),
-                
-                
-                # manual data upload
-                div(class = "dashboard-card",
-                    div(class = "dashboard-card__header", "Manual Data Upload"),
-                    div(class = "dashboard-card__content",
-                        p(class = "govuk-body", "Upload ONS Excel files to use instead of the database. Download the latest files from ONS:"),
-                        tags$ul(class = "govuk-list",
-                                tags$li(tags$a(href = "https://www.ons.gov.uk/employmentandlabourmarket/peopleinwork/employmentandemployeetypes/datasets/summaryoflabourmarketstatistics/current",
-                                               target = "_blank", "A01: Summary of labour market statistics")),
-                                tags$li(tags$a(href = "https://www.ons.gov.uk/economy/economicoutputandproductivity/output/datasets/advancednotificationofpotentialredundancies",
-                                               target = "_blank", "HR1: Advanced notification of potential redundancies")),
-                                tags$li(tags$a(href = "https://www.ons.gov.uk/employmentandlabourmarket/peopleinwork/earningsandworkinghours/datasets/x09realaverageweeklyearningsusingconsumerpriceinflationseasonallyadjusted",
-                                               target = "_blank", "X09: Real average weekly earnings (CPI-adjusted)")),
-                                tags$li(tags$a(href = "https://www.ons.gov.uk/employmentandlabourmarket/peopleinwork/earningsandworkinghours/datasets/realtimeinformationstatisticsreferencetableseasonallyadjusted",
-                                               target = "_blank", "RTISA: Payrolled employees (seasonally adjusted)"))
-                        ),
-                        div(class = "govuk-grid-row",
-                            div(class = "govuk-grid-column-one-half",
-                                fileInput("upload_a01", "A01 (.xlsx)", accept = ".xlsx", width = "100%"),
-                                fileInput("upload_hr1", "HR1 (.xlsx)", accept = ".xlsx", width = "100%")
-                            ),
-                            div(class = "govuk-grid-column-one-half",
-                                fileInput("upload_x09", "X09 (.xlsx)", accept = ".xlsx", width = "100%"),
-                                fileInput("upload_rtisa", "RTISA (.xlsx)", accept = ".xlsx", width = "100%")
-                            )
-                        ),
-                        uiOutput("upload_status")
-                    )
-                ),
+                # two-column layout: auto (left) vs manual (right)
+                div(class = "mode-row",
 
-                # vacancies & payroll
-                div(class = "dashboard-card",
-                    div(class = "dashboard-card__header", "Vacancies & Payroll"),
-                    div(class = "dashboard-card__content",
-                        div(class = "input-row",
-                            div(class = "govuk-form-group",
-                                tags$label(class = "govuk-label", `for` = "vacancies_period", "Vacancies"),
-                                selectInput("vacancies_period", label = NULL, choices = c("Loading" = "Loading"), selected = "Loading")
-                            ),
-                            div(class = "govuk-form-group",
-                                tags$label(class = "govuk-label", `for` = "payroll_period", "Payroll employees"),
-                                selectInput("payroll_period", label = NULL, choices = c("Loading" = "Loading"), selected = "Loading")
+                    # ---- LEFT COLUMN: Automatic (Database) ----
+                    div(class = "mode-col",
+                        div(class = "dashboard-card",
+                            div(class = "dashboard-card__header", "Automatic (Database)"),
+                            div(class = "dashboard-card__content",
+
+                                div(class = "govuk-form-group",
+                                    tags$label(class = "govuk-label", "Reference month"),
+                                    div(class = "govuk-hint", "Auto-selected from latest available data"),
+                                    uiOutput("month_status")
+                                ),
+
+                                div(class = "input-row",
+                                    div(class = "govuk-form-group",
+                                        tags$label(class = "govuk-label", `for` = "vacancies_period", "Vacancies"),
+                                        selectInput("vacancies_period", label = NULL, choices = c("Loading" = "Loading"), selected = "Loading")
+                                    ),
+                                    div(class = "govuk-form-group",
+                                        tags$label(class = "govuk-label", `for` = "payroll_period", "Payroll employees"),
+                                        selectInput("payroll_period", label = NULL, choices = c("Loading" = "Loading"), selected = "Loading")
+                                    )
+                                ),
+
+                                tags$hr(class = "govuk-section-break"),
+
+                                h2(class = "govuk-heading-m", "Preview"),
+                                actionButton("preview_dashboard", "Preview Dashboard", class = "govuk-button govuk-button--blue"),
+                                actionButton("preview_topten", "Preview Top Ten Stats", class = "govuk-button govuk-button--blue"),
+
+                                tags$hr(class = "govuk-section-break"),
+
+                                h2(class = "govuk-heading-m", "Download"),
+                                downloadButton("download_word", "Download Word", class = "govuk-button"),
+                                downloadButton("download_excel", "Download Excel", class = "govuk-button govuk-button--secondary")
                             )
                         )
-                    )
-                ),
-                # actions
-                div(class = "dashboard-card",
-                    div(class = "dashboard-card__header", "Actions"),
-                    div(class = "dashboard-card__content",
-                        h2(class = "govuk-heading-m", "Preview Data"),
-                        p(class = "govuk-body", "Load and preview statistics before generating documents."),
-                        actionButton("preview_dashboard", "Preview Dashboard", class = "govuk-button govuk-button--blue"),
-                        actionButton("preview_topten", "Preview Top Ten Stats", class = "govuk-button govuk-button--blue"),
-                        
-                        tags$hr(class = "govuk-section-break"),
-                        
-                        h2(class = "govuk-heading-m", "Download Documents"),
-                        p(class = "govuk-body", "Generate and download briefing documents."),
-                        downloadButton("download_word", "Download Word Document", class = "govuk-button"),
-                        downloadButton("download_excel", "Download Excel Workbook", class = "govuk-button govuk-button--secondary")
+                    ),
+
+                    # ---- RIGHT COLUMN: Manual (Excel Upload) ----
+                    div(class = "mode-col mode-col--manual",
+                        div(class = "dashboard-card",
+                            div(class = "dashboard-card__header", "Manual (Excel Upload)"),
+                            div(class = "dashboard-card__content",
+
+                                p(class = "govuk-body", "Upload all 4 ONS Excel files to generate from local data."),
+                                tags$ul(class = "govuk-list",
+                                    tags$li(tags$a(href = "https://www.ons.gov.uk/employmentandlabourmarket/peopleinwork/employmentandemployeetypes/datasets/summaryoflabourmarketstatistics/current",
+                                                   target = "_blank", "A01: Summary of labour market statistics")),
+                                    tags$li(tags$a(href = "https://www.ons.gov.uk/economy/economicoutputandproductivity/output/datasets/advancednotificationofpotentialredundancies",
+                                                   target = "_blank", "HR1: Potential redundancies")),
+                                    tags$li(tags$a(href = "https://www.ons.gov.uk/employmentandlabourmarket/peopleinwork/earningsandworkinghours/datasets/x09realaverageweeklyearningsusingconsumerpriceinflationseasonallyadjusted",
+                                                   target = "_blank", "X09: Real average weekly earnings (CPI)")),
+                                    tags$li(tags$a(href = "https://www.ons.gov.uk/employmentandlabourmarket/peopleinwork/earningsandworkinghours/datasets/realtimeinformationstatisticsreferencetableseasonallyadjusted",
+                                                   target = "_blank", "RTISA: Payrolled employees (SA)"))
+                                ),
+
+                                div(class = "govuk-grid-row",
+                                    div(class = "govuk-grid-column-one-half",
+                                        fileInput("upload_a01", "A01 (.xlsx)", accept = ".xlsx", width = "100%"),
+                                        fileInput("upload_hr1", "HR1 (.xlsx)", accept = ".xlsx", width = "100%")
+                                    ),
+                                    div(class = "govuk-grid-column-one-half",
+                                        fileInput("upload_x09", "X09 (.xlsx)", accept = ".xlsx", width = "100%"),
+                                        fileInput("upload_rtisa", "RTISA (.xlsx)", accept = ".xlsx", width = "100%")
+                                    )
+                                ),
+
+                                uiOutput("upload_status"),
+
+                                tags$hr(class = "govuk-section-break"),
+
+                                h2(class = "govuk-heading-m", "Preview"),
+                                actionButton("manual_preview_dashboard", "Preview Dashboard", class = "govuk-button govuk-button--blue"),
+                                actionButton("manual_preview_topten", "Preview Top Ten Stats", class = "govuk-button govuk-button--blue"),
+
+                                tags$hr(class = "govuk-section-break"),
+
+                                h2(class = "govuk-heading-m", "Download"),
+                                downloadButton("manual_download_word", "Download Word", class = "govuk-button"),
+                                downloadButton("manual_download_excel", "Download Excel", class = "govuk-button govuk-button--secondary")
+                            )
+                        )
                     )
                 )
       )
@@ -572,8 +612,13 @@ server <- function(input, output, session) {
   top_ten_path      <- "sheets/top_ten_stats.R"
   template_path     <- "utils/DB.docx"
 
-  # helper: check if any Excel files have been uploaded
+  # helper: check if ALL 4 Excel files have been uploaded
   has_uploads <- function() {
+    !is.null(uploaded_files$a01) && !is.null(uploaded_files$hr1) &&
+      !is.null(uploaded_files$x09) && !is.null(uploaded_files$rtisa)
+  }
+
+  has_any_upload <- function() {
     !is.null(uploaded_files$a01) || !is.null(uploaded_files$hr1) ||
       !is.null(uploaded_files$x09) || !is.null(uploaded_files$rtisa)
   }
@@ -598,17 +643,25 @@ server <- function(input, output, session) {
 
   # upload status display
   output$upload_status <- renderUI({
-    files <- c(
-      A01 = uploaded_files$a01,
-      HR1 = uploaded_files$hr1,
-      X09 = uploaded_files$x09,
-      RTISA = uploaded_files$rtisa
+    present <- c(
+      A01   = !is.null(uploaded_files$a01),
+      HR1   = !is.null(uploaded_files$hr1),
+      X09   = !is.null(uploaded_files$x09),
+      RTISA = !is.null(uploaded_files$rtisa)
     )
-    uploaded <- names(files)[!vapply(files, is.null, logical(1))]
-    if (length(uploaded) == 0) return(NULL)
+    n_up <- sum(present)
+    if (n_up == 0) return(NULL)
+    if (n_up == 4) {
+      return(div(style = "margin-top: 10px;",
+                 span(class = "govuk-tag govuk-tag--green", "Ready"),
+                 span(style = "margin-left: 8px;", "4 of 4 uploaded")
+      ))
+    }
+    missing <- names(present)[!present]
     div(style = "margin-top: 10px;",
-        span(class = "govuk-tag govuk-tag--green", paste(length(uploaded), "uploaded")),
-        span(style = "margin-left: 8px;", paste(uploaded, collapse = ", "))
+        span(class = "govuk-tag govuk-tag--amber", paste(n_up, "of 4")),
+        span(style = "margin-left: 8px; color: #f47738; font-weight: 600;",
+             paste("Missing:", paste(missing, collapse = ", ")))
     )
   })
   
@@ -820,9 +873,7 @@ server <- function(input, output, session) {
       incProgress(0.1, detail = "Step 1/6: Checking configuration files...")
       Sys.sleep(0.3)
 
-      use_excel <- has_uploads()
-
-      if (!use_excel && !file.exists(calculations_path)) {
+      if (!file.exists(calculations_path)) {
         showNotification("Error: calculations.R not found", type = "error")
         return()
       }
@@ -849,22 +900,10 @@ server <- function(input, output, session) {
       calc_env$vacancies_mode <- mode_from_choice(input$vacancies_period, labs$vac)
       calc_env$payroll_mode <- mode_from_choice(input$payroll_period, labs$payroll)
 
-      incProgress(0.2, detail = if (use_excel) "Step 4/6: Reading uploaded Excel files..." else "Step 4/6: Running calculations...")
+      incProgress(0.2, detail = "Step 4/6: Running calculations...")
 
       tryCatch({
-        if (use_excel) {
-          source(excel_calc_path, local = calc_env)
-          calc_env$run_calculations_from_excel(
-            manual_month = calc_env$manual_month,
-            file_a01   = uploaded_files$a01,
-            file_hr1   = uploaded_files$hr1,
-            file_x09   = uploaded_files$x09,
-            file_rtisa = uploaded_files$rtisa,
-            target_env = calc_env
-          )
-        } else {
-          source(calculations_path, local = calc_env)
-        }
+        source(calculations_path, local = calc_env)
       }, error = function(e) {
         showNotification(paste("Calculation error:", e$message), type = "error", duration = 5)
         return()
@@ -914,9 +953,7 @@ server <- function(input, output, session) {
       incProgress(0.1, detail = "Step 1/6: Checking required files...")
       Sys.sleep(0.3)
 
-      use_excel <- has_uploads()
-
-      if (!use_excel && !file.exists(calculations_path)) {
+      if (!file.exists(calculations_path)) {
         showNotification("Error: calculations.R not found", type = "error")
         return()
       }
@@ -946,22 +983,10 @@ server <- function(input, output, session) {
       vacancies_mode <<- mode_from_choice(input$vacancies_period, labs$vac)
       payroll_mode <<- mode_from_choice(input$payroll_period, labs$payroll)
 
-      incProgress(0.2, detail = if (use_excel) "Step 4/6: Reading uploaded Excel files..." else "Step 4/6: Running calculations...")
+      incProgress(0.2, detail = "Step 4/6: Running calculations...")
 
       tryCatch({
-        if (use_excel) {
-          source(excel_calc_path, local = FALSE)
-          run_calculations_from_excel(
-            manual_month = manual_month,
-            file_a01   = uploaded_files$a01,
-            file_hr1   = uploaded_files$hr1,
-            file_x09   = uploaded_files$x09,
-            file_rtisa = uploaded_files$rtisa,
-            target_env = globalenv()
-          )
-        } else {
-          source(calculations_path, local = FALSE)
-        }
+        source(calculations_path, local = FALSE)
       }, error = function(e) {
         showNotification(paste("Calculation error:", e$message), type = "error", duration = 5)
         return()
@@ -1022,8 +1047,6 @@ server <- function(input, output, session) {
             return()
           }
 
-          use_excel <- has_uploads()
-
           incProgress(0.2, detail = "Step 3/6: Loading word output script...")
 
           source(word_script_path, local = FALSE)
@@ -1034,76 +1057,21 @@ server <- function(input, output, session) {
           pay_mode <- mode_from_choice(input$payroll_period, labs$payroll)
           month_override <- mm
 
-          if (use_excel) {
-            incProgress(0.2, detail = "Step 4/6: Reading uploaded Excel files...")
+          incProgress(0.2, detail = "Step 4/6: Running calculations...")
+          incProgress(0.15, detail = "Step 5/6: Generating document content...")
+          incProgress(0.15, detail = "Step 6/6: Writing Word file...")
 
-            source(excel_calc_path, local = FALSE)
-            source("utils/helpers.R", local = FALSE)
-            if (file.exists(config_path)) source(config_path, local = FALSE)
-            if (!is.null(month_override) && nzchar(month_override)) manual_month <<- tolower(month_override)
-
-            run_calculations_from_excel(
-              manual_month = manual_month,
-              file_a01   = uploaded_files$a01,
-              file_hr1   = uploaded_files$hr1,
-              file_x09   = uploaded_files$x09,
-              file_rtisa = uploaded_files$rtisa,
-              target_env = globalenv()
-            )
-
-            incProgress(0.15, detail = "Step 5/6: Generating summary & top ten...")
-
-            source(summary_path, local = FALSE)
-            source(top_ten_path, local = FALSE)
-            fallback_lines <- function() {
-              stats <- list()
-              for (i in 1:10) stats[[paste0("line", i)]] <- "(Data unavailable)"
-              stats
-            }
-            summary_lines <- tryCatch(generate_summary(), error = function(e) {
-              warning("generate_summary() failed: ", e$message)
-              fallback_lines()
-            })
-            top10_lines <- tryCatch(generate_top_ten(), error = function(e) {
-              warning("generate_top_ten() failed: ", e$message)
-              fallback_lines()
-            })
-
-            incProgress(0.15, detail = "Step 6/6: Writing Word file...")
-
-            doc <- officer::read_docx(template_path)
-
-            # title
-            title_label <- if (exists("manual_month", inherits = TRUE)) manual_month_to_label(manual_month) else ""
-            doc <- replace_all(doc, "Z1", title_label)
-            if (exists("lfs_period_label", inherits = TRUE)) doc <- replace_all(doc, "LFS_PERIOD_LABEL", lfs_period_label)
-            if (exists("lfs_period_short_label", inherits = TRUE)) doc <- replace_all(doc, "LFS_QUARTER_LABEL", lfs_period_short_label)
-            if (exists("vacancies_period_short_label", inherits = TRUE)) doc <- replace_all(doc, "VACANCIES_QUARTER_LABEL", vacancies_period_short_label)
-
-            # summary + top ten lines
-            for (i in 10:1) doc <- replace_all(doc, paste0("sl", i), summary_lines[[paste0("line", i)]])
-            for (i in 10:1) doc <- replace_all(doc, paste0("tt", i), top10_lines[[paste0("line", i)]])
-
-            doc <- replace_all(doc, "RENDER_DATE", format(Sys.Date(), "%d %B %Y"))
-
-            print(doc, target = file)
-          } else {
-            incProgress(0.2, detail = "Step 4/6: Running calculations...")
-            incProgress(0.15, detail = "Step 5/6: Generating document content...")
-            incProgress(0.15, detail = "Step 6/6: Writing Word file...")
-
-            generate_word_output(
-              template_path = template_path,
-              output_path = file,
-              calculations_path = calculations_path,
-              config_path = config_path,
-              summary_path = summary_path,
-              top_ten_path = top_ten_path,
-              manual_month_override = month_override,
-              vacancies_mode_override = vac_mode,
-              payroll_mode_override = pay_mode
-            )
-          }
+          generate_word_output(
+            template_path = template_path,
+            output_path = file,
+            calculations_path = calculations_path,
+            config_path = config_path,
+            summary_path = summary_path,
+            top_ten_path = top_ten_path,
+            manual_month_override = month_override,
+            vacancies_mode_override = vac_mode,
+            payroll_mode_override = pay_mode
+          )
         })
 
         showNotification("Word document generated!", type = "message", duration = 3)
@@ -1198,6 +1166,281 @@ server <- function(input, output, session) {
     }
   )
   
+  # ========================================================================
+  # MANUAL MODE HANDLERS
+  # ========================================================================
+
+  .check_manual_ready <- function() {
+    if (!has_uploads()) {
+      present <- c(
+        A01 = !is.null(uploaded_files$a01), HR1 = !is.null(uploaded_files$hr1),
+        X09 = !is.null(uploaded_files$x09), RTISA = !is.null(uploaded_files$rtisa)
+      )
+      missing <- names(present)[!present]
+      showNotification(
+        paste("Upload all 4 Excel files first. Missing:", paste(missing, collapse = ", ")),
+        type = "warning", duration = 5
+      )
+      return(FALSE)
+    }
+    TRUE
+  }
+
+  # manual preview: dashboard
+  observeEvent(input$manual_preview_dashboard, {
+    if (!.check_manual_ready()) return()
+
+    withProgress(message = "Loading Dashboard (Excel)", value = 0, {
+
+      incProgress(0.1, detail = "Reading Excel files...")
+
+      calc_env <- new.env(parent = globalenv())
+      mm <- reference_manual_month()
+      if (!is.null(mm) && nzchar(mm)) calc_env$manual_month <- tolower(mm)
+
+      incProgress(0.3, detail = "Running calculations...")
+
+      source(excel_calc_path, local = calc_env)
+      source("utils/helpers.R", local = calc_env)
+      calc_env$run_calculations_from_excel(
+        manual_month = calc_env$manual_month,
+        file_a01 = uploaded_files$a01, file_hr1 = uploaded_files$hr1,
+        file_x09 = uploaded_files$x09, file_rtisa = uploaded_files$rtisa,
+        target_env = calc_env
+      )
+
+      incProgress(0.4, detail = "Building metrics table...")
+
+      gv <- function(name) {
+        if (exists(name, envir = calc_env)) {
+          val <- get(name, envir = calc_env)
+          if (is.numeric(val)) return(val)
+        }
+        NA_real_
+      }
+
+      metrics <- list(
+        list(name = "Employment 16+ (000s)", cur = gv("emp16_cur") / 1000, dq = gv("emp16_dq") / 1000, dy = gv("emp16_dy") / 1000, dc = gv("emp16_dc") / 1000, de = gv("emp16_de") / 1000, invert = FALSE, type = "count"),
+        list(name = "Employment rate 16-64 (%)", cur = gv("emp_rt_cur"), dq = gv("emp_rt_dq"), dy = gv("emp_rt_dy"), dc = gv("emp_rt_dc"), de = gv("emp_rt_de"), invert = FALSE, type = "rate"),
+        list(name = "Unemployment 16+ (000s)", cur = gv("unemp16_cur") / 1000, dq = gv("unemp16_dq") / 1000, dy = gv("unemp16_dy") / 1000, dc = gv("unemp16_dc") / 1000, de = gv("unemp16_de") / 1000, invert = TRUE, type = "count"),
+        list(name = "Unemployment rate 16+ (%)", cur = gv("unemp_rt_cur"), dq = gv("unemp_rt_dq"), dy = gv("unemp_rt_dy"), dc = gv("unemp_rt_dc"), de = gv("unemp_rt_de"), invert = TRUE, type = "rate"),
+        list(name = "Inactivity 16-64 (000s)", cur = gv("inact_cur") / 1000, dq = gv("inact_dq") / 1000, dy = gv("inact_dy") / 1000, dc = gv("inact_dc") / 1000, de = gv("inact_de") / 1000, invert = TRUE, type = "count"),
+        list(name = "Inactivity 50-64 (000s)", cur = gv("inact5064_cur") / 1000, dq = gv("inact5064_dq") / 1000, dy = gv("inact5064_dy") / 1000, dc = gv("inact5064_dc") / 1000, de = gv("inact5064_de") / 1000, invert = TRUE, type = "count"),
+        list(name = "Inactivity rate 16-64 (%)", cur = gv("inact_rt_cur"), dq = gv("inact_rt_dq"), dy = gv("inact_rt_dy"), dc = gv("inact_rt_dc"), de = gv("inact_rt_de"), invert = TRUE, type = "rate"),
+        list(name = "Inactivity rate 50-64 (%)", cur = gv("inact5064_rt_cur"), dq = gv("inact5064_rt_dq"), dy = gv("inact5064_rt_dy"), dc = gv("inact5064_rt_dc"), de = gv("inact5064_rt_de"), invert = TRUE, type = "rate"),
+        list(name = "Vacancies (000s)", cur = gv("vac_cur"), dq = gv("vac_dq"), dy = gv("vac_dy"), dc = gv("vac_dc"), de = gv("vac_de"), invert = NA, type = "exempt"),
+        list(name = "Payroll employees (000s)", cur = gv("payroll_cur"), dq = gv("payroll_dq"), dy = gv("payroll_dy"), dc = gv("payroll_dc"), de = gv("payroll_de"), invert = FALSE, type = "exempt"),
+        list(name = "Wages total pay (%)", cur = gv("latest_wages"), dq = gv("wages_change_q"), dy = gv("wages_change_y"), dc = gv("wages_change_covid"), de = gv("wages_change_election"), invert = FALSE, type = "wages"),
+        list(name = "Wages CPI-adjusted (%)", cur = gv("latest_wages_cpi"), dq = gv("wages_cpi_change_q"), dy = gv("wages_cpi_change_y"), dc = gv("wages_cpi_change_covid"), de = gv("wages_cpi_change_election"), invert = FALSE, type = "wages")
+      )
+
+      incProgress(0.2, detail = "Done")
+      dashboard_data(metrics)
+    })
+
+    showNotification("Dashboard loaded (Excel mode)", type = "message", duration = 3)
+  })
+
+  # manual preview: top ten
+  observeEvent(input$manual_preview_topten, {
+    if (!.check_manual_ready()) return()
+
+    withProgress(message = "Loading Top Ten (Excel)", value = 0, {
+
+      incProgress(0.2, detail = "Running Excel calculations...")
+
+      if (file.exists(config_path)) source(config_path, local = FALSE)
+      source("utils/helpers.R", local = FALSE)
+
+      mm <- reference_manual_month()
+      if (!is.null(mm) && nzchar(mm)) manual_month <<- tolower(mm)
+
+      source(excel_calc_path, local = FALSE)
+      run_calculations_from_excel(
+        manual_month = manual_month,
+        file_a01 = uploaded_files$a01, file_hr1 = uploaded_files$hr1,
+        file_x09 = uploaded_files$x09, file_rtisa = uploaded_files$rtisa,
+        target_env = globalenv()
+      )
+
+      incProgress(0.5, detail = "Generating top ten stats...")
+
+      source(top_ten_path, local = FALSE)
+
+      if (exists("generate_top_ten")) {
+        top10 <- tryCatch(generate_top_ten(), error = function(e) {
+          showNotification(paste("Top ten error:", e$message), type = "error")
+          NULL
+        })
+        if (!is.null(top10)) topten_data(top10)
+      }
+
+      incProgress(0.3, detail = "Done")
+    })
+
+    showNotification("Top Ten loaded (Excel mode)", type = "message", duration = 3)
+  })
+
+  # manual download: word
+  output$manual_download_word <- downloadHandler(
+    filename = function() {
+      paste0("Labour_Market_Brief_Manual_", format(Sys.Date(), "%Y-%m-%d"), ".docx")
+    },
+    content = function(file) {
+      if (!has_uploads()) {
+        showNotification("Upload all 4 Excel files first", type = "warning")
+        doc <- officer::read_docx()
+        doc <- officer::body_add_par(doc, "Upload all 4 Excel files to generate.", style = "heading 1")
+        print(doc, target = file)
+        return()
+      }
+
+      tryCatch({
+        withProgress(message = "Generating Word (Excel mode)", value = 0, {
+
+          incProgress(0.2, detail = "Loading scripts...")
+
+          source("utils/helpers.R", local = FALSE)
+          source(excel_calc_path, local = FALSE)
+          if (file.exists(config_path)) source(config_path, local = FALSE)
+
+          mm <- reference_manual_month()
+          if (!is.null(mm) && nzchar(mm)) manual_month <<- tolower(mm)
+
+          incProgress(0.3, detail = "Running Excel calculations...")
+
+          run_calculations_from_excel(
+            manual_month = manual_month,
+            file_a01 = uploaded_files$a01, file_hr1 = uploaded_files$hr1,
+            file_x09 = uploaded_files$x09, file_rtisa = uploaded_files$rtisa,
+            target_env = globalenv()
+          )
+
+          incProgress(0.2, detail = "Generating summary & top ten...")
+
+          source(summary_path, local = FALSE)
+          source(top_ten_path, local = FALSE)
+
+          fallback_lines <- function() {
+            stats <- list()
+            for (i in 1:10) stats[[paste0("line", i)]] <- "(Data unavailable)"
+            stats
+          }
+          summary_lines <- tryCatch(generate_summary(), error = function(e) fallback_lines())
+          top10_lines <- tryCatch(generate_top_ten(), error = function(e) fallback_lines())
+
+          incProgress(0.2, detail = "Writing Word file...")
+
+          # use ManualDB.docx template with qvz placeholders
+          manual_template <- "utils/ManualDB.docx"
+          if (file.exists(manual_template)) {
+            source("utils/manual_word_output.R", local = FALSE)
+            generate_manual_word_output(
+              manual_month = manual_month,
+              file_a01 = uploaded_files$a01, file_hr1 = uploaded_files$hr1,
+              file_x09 = uploaded_files$x09, file_rtisa = uploaded_files$rtisa,
+              template_path = manual_template,
+              output_path = file,
+              verbose = FALSE
+            )
+          } else if (file.exists(template_path)) {
+            # fallback to DB.docx with old-style placeholders
+            source(word_script_path, local = FALSE)
+            doc <- officer::read_docx(template_path)
+            title_label <- if (exists("manual_month", inherits = TRUE)) manual_month_to_label(manual_month) else ""
+            doc <- replace_all(doc, "Z1", title_label)
+            if (exists("lfs_period_label", inherits = TRUE)) doc <- replace_all(doc, "LFS_PERIOD_LABEL", lfs_period_label)
+            if (exists("lfs_period_short_label", inherits = TRUE)) doc <- replace_all(doc, "LFS_QUARTER_LABEL", lfs_period_short_label)
+            if (exists("vacancies_period_short_label", inherits = TRUE)) doc <- replace_all(doc, "VACANCIES_QUARTER_LABEL", vacancies_period_short_label)
+            for (i in 10:1) doc <- replace_all(doc, paste0("sl", i), summary_lines[[paste0("line", i)]])
+            for (i in 10:1) doc <- replace_all(doc, paste0("tt", i), top10_lines[[paste0("line", i)]])
+            doc <- replace_all(doc, "RENDER_DATE", format(Sys.Date(), "%d %B %Y"))
+            print(doc, target = file)
+          } else {
+            stop("No Word template found (ManualDB.docx or DB.docx)")
+          }
+
+          incProgress(0.1, detail = "Done")
+        })
+
+        showNotification("Word document generated (Excel mode)", type = "message", duration = 3)
+
+      }, error = function(e) {
+        message("Manual Word error: ", e$message)
+        showNotification(paste("Word error:", e$message), type = "error", duration = 5)
+        if (requireNamespace("officer", quietly = TRUE)) {
+          doc <- officer::read_docx()
+          doc <- officer::body_add_par(doc, "Error Generating Brief", style = "heading 1")
+          doc <- officer::body_add_par(doc, paste("Error:", e$message))
+          print(doc, target = file)
+        } else {
+          writeLines(paste("Error:", e$message), con = file)
+        }
+      })
+    }
+  )
+
+  # manual download: excel
+  output$manual_download_excel <- downloadHandler(
+    filename = function() { "LM_Stats_Audit_Manual.xlsx" },
+    content = function(file) {
+      if (!has_uploads()) {
+        showNotification("Upload all 4 Excel files first", type = "warning")
+        if (requireNamespace("openxlsx", quietly = TRUE)) {
+          wb <- openxlsx::createWorkbook()
+          openxlsx::addWorksheet(wb, "Error")
+          openxlsx::writeData(wb, "Error", data.frame(Error = "Upload all 4 Excel files to generate."))
+          openxlsx::saveWorkbook(wb, file, overwrite = TRUE)
+        }
+        return()
+      }
+
+      tryCatch({
+        withProgress(message = "Generating Excel (manual)", value = 0, {
+          incProgress(0.2, detail = "Loading scripts...")
+          source("utils/helpers.R", local = FALSE)
+          source(excel_calc_path, local = FALSE)
+          if (file.exists(config_path)) source(config_path, local = FALSE)
+
+          mm <- reference_manual_month()
+          if (!is.null(mm) && nzchar(mm)) manual_month <<- tolower(mm)
+
+          incProgress(0.4, detail = "Running Excel calculations...")
+          run_calculations_from_excel(
+            manual_month = manual_month,
+            file_a01 = uploaded_files$a01, file_hr1 = uploaded_files$hr1,
+            file_x09 = uploaded_files$x09, file_rtisa = uploaded_files$rtisa,
+            target_env = globalenv()
+          )
+
+          incProgress(0.3, detail = "Building workbook...")
+          excel_env <- new.env(parent = globalenv())
+          source(excel_script_path, local = excel_env)
+          tmp_xlsx <- tempfile(fileext = ".xlsx")
+          excel_env$create_audit_workbook(
+            output_path = tmp_xlsx,
+            calculations_path = calculations_path,
+            config_path = config_path,
+            verbose = FALSE
+          )
+
+          incProgress(0.1, detail = "Done")
+          file.copy(tmp_xlsx, file, overwrite = TRUE)
+        })
+        showNotification("Excel workbook generated (manual mode)", type = "message", duration = 3)
+      }, error = function(e) {
+        message("Manual Excel error: ", e$message)
+        showNotification(paste("Excel error:", e$message), type = "error", duration = 5)
+        if (requireNamespace("openxlsx", quietly = TRUE)) {
+          wb <- openxlsx::createWorkbook()
+          openxlsx::addWorksheet(wb, "Error")
+          openxlsx::writeData(wb, "Error", data.frame(Error = paste("Failed:", e$message)))
+          openxlsx::saveWorkbook(wb, file, overwrite = TRUE)
+        }
+      })
+    }
+  )
+
   # render: dashboard preview
   
   output$dashboard_preview <- renderUI({
