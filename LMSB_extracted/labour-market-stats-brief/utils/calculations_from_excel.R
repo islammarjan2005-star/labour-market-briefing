@@ -1,7 +1,12 @@
 # calculations_from_excel.R
-# reads uploaded ONS Excel files (A01, HR1, X09, RTISA) and produces
-# the same output variables as calculations.R (database mode).
-# mirrors the approach used in the original Rmd briefing.
+# Fresh rewrite — reads uploaded ONS Excel files (A01, HR1, X09, RTISA)
+# and produces output variables consumed by manual_word_output.R,
+# summary.R, and top_ten_stats.R.
+#
+# Key design decisions:
+#   - Sheet names as STRINGS (not integer positions) to avoid readxl indexing bugs
+#   - Row lookup by period label text, not hardcoded row numbers
+#   - Column positions verified against actual Feb 2026 ONS files
 
 suppressPackageStartupMessages({
   library(readxl)
@@ -14,88 +19,82 @@ if (!exists("parse_manual_month", inherits = TRUE)) {
 }
 
 # ============================================================================
-# HELPER FUNCTIONS (from Rmd)
+# INTERNAL HELPERS
 # ============================================================================
 
-.get_series <- function(tbl, idx) {
-  if (is.null(tbl) || !is.data.frame(tbl) || ncol(tbl) < idx) return(numeric(0))
-  x <- gsub("[^0-9.-]", "", as.character(tbl[[idx]]))
-  suppressWarnings(na.omit(as.numeric(x)))
+# Safe read: returns empty data.frame on failure
+.read_sheet <- function(path, sheet) {
+  tryCatch(
+    suppressMessages(readxl::read_excel(path, sheet = sheet, col_names = FALSE)),
+    error = function(e) {
+      warning("Failed to read sheet '", sheet, "' from ", basename(path), ": ", e$message)
+      data.frame()
+    }
+  )
 }
 
-.safe_last <- function(x, k = 1) {
-  if (length(x) >= k) tail(x, k)[k] else NA_real_
+# Find row index where column 1 matches a label (trimmed, case-insensitive)
+.find_row <- function(tbl, label) {
+  if (nrow(tbl) == 0 || ncol(tbl) == 0) return(NA_integer_)
+  col1 <- trimws(as.character(tbl[[1]]))
+  label <- trimws(label)
+  idx <- which(tolower(col1) == tolower(label))
+  if (length(idx) == 0) return(NA_integer_)
+  idx[1]
 }
 
-.parse_cpi_dates <- function(x) {
-  s <- as.character(x)
-  as_num <- suppressWarnings(as.numeric(s))
-  is_serial <- !is.na(as_num) & grepl("^[0-9]+$", s)
-  out <- rep(as.Date(NA), length(s))
-  if (any(is_serial)) out[is_serial] <- as.Date(as_num[is_serial], origin = "1899-12-30")
-  if (any(!is_serial)) out[!is_serial] <- suppressWarnings(lubridate::mdy(s[!is_serial]))
-  floor_date(out, "month")
+# Extract numeric value at [row, col] — strips non-numeric chars
+.cell_num <- function(tbl, row, col) {
+  if (is.na(row) || row < 1 || row > nrow(tbl) || col > ncol(tbl)) return(NA_real_)
+  x <- as.character(tbl[[col]][row])
+  suppressWarnings(as.numeric(gsub("[^0-9.eE+-]", "", x)))
 }
 
+# Build LFS 3-month label: "Oct-Dec 2025" from end date 2025-12-01
+.lfs_label <- function(end_date) {
+  start_date <- end_date %m-% months(2)
+  sprintf("%s-%s %s", format(start_date, "%b"), format(end_date, "%b"), format(end_date, "%Y"))
+}
+
+# Detect dates from mixed column (Excel serial numbers, datetimes, text)
 .detect_dates <- function(x) {
   if (inherits(x, "Date")) return(floor_date(as.Date(x), "month"))
   if (inherits(x, c("POSIXct", "POSIXt"))) return(floor_date(as.Date(x), "month"))
   s <- as.character(x)
   num <- suppressWarnings(as.numeric(s))
-  is_num <- !is.na(num) & grepl("^[0-9]+$", s)
+  is_num <- !is.na(num) & grepl("^[0-9]+\\.?[0-9]*$", s)
   out <- rep(as.Date(NA), length(s))
   if (any(is_num)) out[is_num] <- as.Date(num[is_num], origin = "1899-12-30")
   if (any(!is_num)) {
     out[!is_num] <- suppressWarnings(
       lubridate::parse_date_time(
         s[!is_num],
-        orders = c("ymd", "mdy", "dmy", "bY", "BY", "Y b", "b Y",
-                    "Ym", "my", "%b-%Y", "%B-%Y", "%Y-%b", "%Y-%B")
+        orders = c("ymd", "mdy", "dmy", "bY", "BY", "Y b", "b Y", "Ym", "my")
       )
     )
   }
   floor_date(as.Date(out), "month")
 }
 
-.make_lfs_table_label <- function(end_date) {
-  start_date <- end_date %m-% months(2)
-  sprintf("%s-%s %s", format(start_date, "%b"), format(end_date, "%b"), format(end_date, "%Y"))
+# Lookup value in a date-indexed data.frame
+.val_by_date <- function(df_m, df_v, target_date) {
+  idx <- which(df_m == target_date)
+  if (length(idx) == 0) return(NA_real_)
+  df_v[idx[1]]
 }
 
-.val_by_label <- function(tbl, label, col_idx) {
-  r <- which(trimws(as.character(tbl[[1]])) == label)[1]
-  if (length(r) == 0 || is.na(r)) return(NA_real_)
-  x <- gsub("[^0-9.-]", "", as.character(tbl[[col_idx]][r]))
-  suppressWarnings(as.numeric(x))
+# Average of values at specified dates
+.avg_by_dates <- function(df_m, df_v, target_dates) {
+  vals <- vapply(target_dates, function(d) .val_by_date(df_m, df_v, d), numeric(1))
+  if (any(is.na(vals))) return(NA_real_)
+  mean(vals)
 }
 
-.pick_vals <- function(month_vec, value_vec, keys) {
-  idx <- match(keys, month_vec)
-  if (any(is.na(idx))) return(rep(NA_real_, length(keys)))
-  value_vec[idx]
-}
-
-.pick_avg <- function(month_vec, value_vec, keys) {
-  v <- .pick_vals(month_vec, value_vec, keys)
-  if (any(is.na(v))) return(NA_real_)
-  mean(v)
-}
-
-.get_avg <- function(df, months_vec) {
-  idx <- match(months_vec, df$m)
-  if (any(is.na(idx))) return(NA_real_)
-  mean(df$v[idx])
-}
-
-# safe read helper
-.read_sheet <- function(path, sheet) {
-  tryCatch(
-    suppressMessages(readxl::read_excel(path, sheet = sheet, col_names = FALSE)),
-    error = function(e) {
-      warning("Failed to read sheet '", sheet, "': ", e$message)
-      data.frame()
-    }
-  )
+# Safe last non-NA value from a numeric vector
+.safe_last <- function(x) {
+  x <- x[!is.na(x)]
+  if (length(x) == 0) return(NA_real_)
+  x[length(x)]
 }
 
 # ============================================================================
@@ -109,126 +108,266 @@ run_calculations_from_excel <- function(manual_month,
                                          file_rtisa = NULL,
                                          target_env = globalenv()) {
 
-  cm <- parse_manual_month(manual_month)
-  anchor_m <- cm %m-% months(2)
+  cm <- parse_manual_month(manual_month)      # e.g. 2026-02-01 for "feb2026"
+  anchor_m <- cm %m-% months(2)               # e.g. 2025-12-01 (LFS end month)
 
-  # comparison periods
-  COVID_LFS_LABEL <- "Dec-Feb 2020"
-  ELECTION_LABEL <- "Apr-Jun 2024"
+  # Comparison period labels (LFS 3-month rolling)
+  lfs_end_cur  <- anchor_m                     # Dec 2025
+  lfs_end_q    <- anchor_m %m-% months(3)      # Sep 2025
+  lfs_end_y    <- anchor_m %m-% months(12)     # Dec 2024
+  lfs_end_covid <- as.Date("2020-02-01")       # Dec-Feb 2020
+  lfs_end_elec  <- as.Date("2024-07-01")       # May-Jul 2024
+
+  lab_cur   <- .lfs_label(lfs_end_cur)   # "Oct-Dec 2025"
+  lab_q     <- .lfs_label(lfs_end_q)     # "Jul-Sep 2025"
+  lab_y     <- .lfs_label(lfs_end_y)     # "Oct-Dec 2024"
+  lab_covid <- .lfs_label(lfs_end_covid) # "Dec-Feb 2020"
+  lab_elec  <- .lfs_label(lfs_end_elec)  # "May-Jul 2024"
 
   # ==========================================================================
-  # READ EXCEL SHEETS
+  # A01 — Sheet "1": Main LFS summary
+  # Columns: A=period text, D=emp16+ level, E=unemp16+ level,
+  #   I=unemp rate 16+, O=inact level 16-64, Q=emp rate 16-64, S=inact rate 16-64
   # ==========================================================================
 
-  tbl_s2 <- if (!is.null(file_a01)) .read_sheet(file_a01, 2) else data.frame()
-  tbl_10 <- if (!is.null(file_a01)) .read_sheet(file_a01, 10) else data.frame()
-  tbl_13 <- if (!is.null(file_a01)) .read_sheet(file_a01, 13) else data.frame()
-  tbl_15 <- if (!is.null(file_a01)) .read_sheet(file_a01, 15) else data.frame()
-  tbl_18 <- if (!is.null(file_a01)) .read_sheet(file_a01, 18) else data.frame()
-  tbl_19 <- if (!is.null(file_a01)) .read_sheet(file_a01, 19) else data.frame()
+  tbl_1 <- if (!is.null(file_a01)) .read_sheet(file_a01, "1") else data.frame()
+
+  .lfs_metric <- function(tbl, col, labels) {
+    rows <- vapply(labels, function(l) .find_row(tbl, l), integer(1))
+    vals <- vapply(seq_along(rows), function(i) .cell_num(tbl, rows[i], col), numeric(1))
+    names(vals) <- c("cur", "q", "y", "covid", "elec")
+    list(
+      cur = vals["cur"],
+      dq  = vals["cur"] - vals["q"],
+      dy  = vals["cur"] - vals["y"],
+      dc  = vals["cur"] - vals["covid"],
+      de  = vals["cur"] - vals["elec"]
+    )
+  }
+
+  all_labels <- c(lab_cur, lab_q, lab_y, lab_covid, lab_elec)
+
+  m_emp16   <- .lfs_metric(tbl_1, 4,  all_labels)   # Col D: employment 16+ level
+  m_emprt   <- .lfs_metric(tbl_1, 17, all_labels)   # Col Q: employment rate 16-64
+  m_unemp16 <- .lfs_metric(tbl_1, 5,  all_labels)   # Col E: unemployment 16+ level
+  m_unemprt <- .lfs_metric(tbl_1, 9,  all_labels)   # Col I: unemployment rate 16+
+  m_inact   <- .lfs_metric(tbl_1, 15, all_labels)   # Col O: inactivity level 16-64
+  m_inactrt <- .lfs_metric(tbl_1, 19, all_labels)   # Col S: inactivity rate 16-64
+
+  # Assign LFS main metrics
+  for (prefix in c("emp16", "emp_rt", "unemp16", "unemp_rt", "inact", "inact_rt")) {
+    m <- switch(prefix,
+      emp16 = m_emp16, emp_rt = m_emprt,
+      unemp16 = m_unemp16, unemp_rt = m_unemprt,
+      inact = m_inact, inact_rt = m_inactrt
+    )
+    assign(paste0(prefix, "_cur"), m$cur, envir = target_env)
+    assign(paste0(prefix, "_dq"),  m$dq,  envir = target_env)
+    assign(paste0(prefix, "_dy"),  m$dy,  envir = target_env)
+    assign(paste0(prefix, "_dc"),  m$dc,  envir = target_env)
+    assign(paste0(prefix, "_de"),  m$de,  envir = target_env)
+  }
+
+  # ==========================================================================
+  # A01 — Sheet "2": Age breakdown (50-64 inactivity)
+  # Columns: A=period, BD(col 56)=inact 50-64 level, BE(col 57)=inact 50-64 rate
+  # ==========================================================================
+
+  tbl_2 <- if (!is.null(file_a01)) .read_sheet(file_a01, "2") else data.frame()
+
+  m_5064   <- .lfs_metric(tbl_2, 56, all_labels)  # Col BD: inactivity 50-64 level
+  m_5064rt <- .lfs_metric(tbl_2, 57, all_labels)  # Col BE: inactivity 50-64 rate
+
+  for (prefix in c("inact5064", "inact5064_rt")) {
+    m <- if (prefix == "inact5064") m_5064 else m_5064rt
+    assign(paste0(prefix, "_cur"), m$cur, envir = target_env)
+    assign(paste0(prefix, "_dq"),  m$dq,  envir = target_env)
+    assign(paste0(prefix, "_dy"),  m$dy,  envir = target_env)
+    assign(paste0(prefix, "_dc"),  m$dc,  envir = target_env)
+    assign(paste0(prefix, "_de"),  m$de,  envir = target_env)
+  }
+
+  # ==========================================================================
+  # A01 — Sheet "10": Redundancy
+  # Columns: A=period, B(col 2)=level, C(col 3)=rate per 1000
+  # ==========================================================================
+
+  tbl_10 <- if (!is.null(file_a01)) .read_sheet(file_a01, "10") else data.frame()
+
+  m_redund <- .lfs_metric(tbl_10, 3, all_labels)  # Col C: rate per 1000
+  m_redund_level <- .lfs_metric(tbl_10, 2, all_labels)  # Col B: level
+
+  assign("redund_cur", m_redund$cur, envir = target_env)
+  assign("redund_dq",  m_redund$dq,  envir = target_env)
+  assign("redund_dy",  m_redund$dy,  envir = target_env)
+  assign("redund_dc",  m_redund$dc,  envir = target_env)
+  assign("redund_de",  m_redund$de,  envir = target_env)
+
+  # ==========================================================================
+  # A01 — Sheet "13" (STRING name): AWE Total Pay (nominal)
+  # Columns: A=period text, B(col 2)=weekly £, D(col 4)=3-month avg % YoY
+  # ==========================================================================
+
+  tbl_13 <- if (!is.null(file_a01)) .read_sheet(file_a01, "13") else data.frame()
+
+  if (nrow(tbl_13) > 0 && ncol(tbl_13) >= 4) {
+    w13_dates <- .detect_dates(tbl_13[[1]])
+    w13_weekly <- suppressWarnings(as.numeric(gsub("[^0-9.-]", "", as.character(tbl_13[[2]]))))
+    w13_pct    <- suppressWarnings(as.numeric(gsub("[^0-9.-]", "", as.character(tbl_13[[4]]))))
+
+    latest_wages <- .val_by_date(w13_dates, w13_pct, anchor_m)
+
+    # Weekly £ change for dashboard (quarterly and other comparisons)
+    win3 <- c(anchor_m, anchor_m %m-% months(1), anchor_m %m-% months(2))
+    prev3 <- c(anchor_m %m-% months(3), anchor_m %m-% months(4), anchor_m %m-% months(5))
+    yago3 <- win3 %m-% months(12)
+    covid3 <- as.Date(c("2019-12-01", "2020-01-01", "2020-02-01"))
+    election3 <- as.Date(c("2024-05-01", "2024-06-01", "2024-07-01"))
+
+    .wage_change <- function(a_months, b_months) {
+      a <- .avg_by_dates(w13_dates, w13_weekly, a_months)
+      b <- .avg_by_dates(w13_dates, w13_weekly, b_months)
+      if (is.na(a) || is.na(b)) NA_real_ else (a - b) * 52
+    }
+
+    wages_change_q <- .wage_change(win3, prev3)
+    wages_change_y <- .wage_change(win3, yago3)
+    wages_change_covid <- .wage_change(win3, covid3)
+    wages_change_election <- .wage_change(win3, election3)
+
+    # Quarterly pp change in YoY growth rate (for narrative)
+    prev_q_pct <- .val_by_date(w13_dates, w13_pct, anchor_m %m-% months(3))
+    wages_total_qchange <- if (!is.na(latest_wages) && !is.na(prev_q_pct)) latest_wages - prev_q_pct else NA_real_
+  } else {
+    latest_wages <- wages_change_q <- wages_change_y <- NA_real_
+    wages_change_covid <- wages_change_election <- wages_total_qchange <- NA_real_
+    win3 <- c(anchor_m, anchor_m %m-% months(1), anchor_m %m-% months(2))
+  }
+
+  # ==========================================================================
+  # A01 — Sheet "15" (STRING name): AWE Regular Pay (nominal)
+  # Columns: A=period text, B(col 2)=weekly £, D(col 4)=3-month avg % YoY
+  # ==========================================================================
+
+  tbl_15 <- if (!is.null(file_a01)) .read_sheet(file_a01, "15") else data.frame()
+
+  if (nrow(tbl_15) > 0 && ncol(tbl_15) >= 4) {
+    w15_dates <- .detect_dates(tbl_15[[1]])
+    w15_pct   <- suppressWarnings(as.numeric(gsub("[^0-9.-]", "", as.character(tbl_15[[4]]))))
+
+    latest_regular_cash <- .val_by_date(w15_dates, w15_pct, anchor_m)
+
+    prev_q_reg <- .val_by_date(w15_dates, w15_pct, anchor_m %m-% months(3))
+    wages_reg_qchange <- if (!is.na(latest_regular_cash) && !is.na(prev_q_reg)) latest_regular_cash - prev_q_reg else NA_real_
+  } else {
+    latest_regular_cash <- NA_real_
+    wages_reg_qchange <- NA_real_
+  }
+
+  # Public/private not available from A01 directly
+  wages_total_public  <- NA_real_
+  wages_total_private <- NA_real_
+  wages_reg_public    <- NA_real_
+  wages_reg_private   <- NA_real_
+
+  assign("latest_wages",          latest_wages,          envir = target_env)
+  assign("wages_change_q",        wages_change_q,        envir = target_env)
+  assign("wages_change_y",        wages_change_y,        envir = target_env)
+  assign("wages_change_covid",    wages_change_covid,    envir = target_env)
+  assign("wages_change_election", wages_change_election, envir = target_env)
+  assign("wages_total_public",    wages_total_public,    envir = target_env)
+  assign("wages_total_private",   wages_total_private,   envir = target_env)
+  assign("wages_total_qchange",   wages_total_qchange,   envir = target_env)
+  assign("latest_regular_cash",   latest_regular_cash,   envir = target_env)
+  assign("wages_reg_public",      wages_reg_public,      envir = target_env)
+  assign("wages_reg_private",     wages_reg_private,     envir = target_env)
+  assign("wages_reg_qchange",     wages_reg_qchange,     envir = target_env)
+
+  # ==========================================================================
+  # X09 — Sheet "AWE Real_CPI": Real wages (CPI-adjusted)
+  # Columns: A(1)=datetime, B(2)=real AWE £, E(5)=total 3m avg % YoY,
+  #   I(9)=regular 3m avg % YoY
+  # ==========================================================================
 
   tbl_cpi <- if (!is.null(file_x09)) .read_sheet(file_x09, "AWE Real_CPI") else data.frame()
 
-  rtisa_s2  <- if (!is.null(file_rtisa)) .read_sheet(file_rtisa, 2) else data.frame()
-  rtisa_s24 <- if (!is.null(file_rtisa)) .read_sheet(file_rtisa, 24) else data.frame()
+  if (nrow(tbl_cpi) > 0 && ncol(tbl_cpi) >= 9) {
+    cpi_months <- .detect_dates(tbl_cpi[[1]])
+    cpi_real   <- suppressWarnings(as.numeric(gsub("[^0-9.-]", "", as.character(tbl_cpi[[2]]))))
+    cpi_total  <- suppressWarnings(as.numeric(gsub("[^0-9.-]", "", as.character(tbl_cpi[[5]]))))
+    cpi_reg    <- suppressWarnings(as.numeric(gsub("[^0-9.-]", "", as.character(tbl_cpi[[9]]))))
 
-  hr1_tbl <- if (!is.null(file_hr1)) .read_sheet(file_hr1, "1a") else data.frame()
+    latest_wages_cpi   <- .val_by_date(cpi_months, cpi_total, anchor_m)
+    latest_regular_cpi <- .val_by_date(cpi_months, cpi_reg, anchor_m)
 
-  # ==========================================================================
-  # LFS (A01 Sheet 2)
-  # ==========================================================================
+    # £ changes for dashboard
+    .cpi_change <- function(a_months, b_months) {
+      a <- .avg_by_dates(cpi_months, cpi_real, a_months)
+      b <- .avg_by_dates(cpi_months, cpi_real, b_months)
+      if (is.na(a) || is.na(b)) NA_real_ else (a - b) * 52
+    }
 
-  .compute_lfs <- function(tbl, col_idx) {
-    if (nrow(tbl) == 0) return(list(cur = NA_real_, dq = NA_real_, dy = NA_real_, dc = NA_real_, de = NA_real_, end = anchor_m))
-    end_cur <- cm %m-% months(2)
-    end_q <- end_cur %m-% months(3)
-    end_y <- end_cur %m-% months(12)
+    prev3_cpi <- c(anchor_m %m-% months(3), anchor_m %m-% months(4), anchor_m %m-% months(5))
+    yago3_cpi <- win3 %m-% months(12)
+    covid3_cpi <- as.Date(c("2019-12-01", "2020-01-01", "2020-02-01"))
+    election3_cpi <- as.Date(c("2024-05-01", "2024-06-01", "2024-07-01"))
 
-    cur <- .val_by_label(tbl, .make_lfs_table_label(end_cur), col_idx)
-    dq <- cur - .val_by_label(tbl, .make_lfs_table_label(end_q), col_idx)
-    dy <- cur - .val_by_label(tbl, .make_lfs_table_label(end_y), col_idx)
-    dc <- cur - .val_by_label(tbl, COVID_LFS_LABEL, col_idx)
-    de <- cur - .val_by_label(tbl, ELECTION_LABEL, col_idx)
+    wages_cpi_change_q <- .cpi_change(win3, prev3_cpi)
+    wages_cpi_change_y <- .cpi_change(win3, yago3_cpi)
+    wages_cpi_change_covid <- .cpi_change(win3, covid3_cpi)
+    wages_cpi_change_election <- .cpi_change(win3, election3_cpi)
 
-    list(cur = cur, dq = dq, dy = dy, dc = dc, de = de, end = end_cur)
+    # vs Dec 2007 and vs 2019 average (for top ten narrative)
+    dec2007_val <- .val_by_date(cpi_months, cpi_real, as.Date("2007-12-01"))
+    cur_cpi_real <- .avg_by_dates(cpi_months, cpi_real, win3)
+    wages_cpi_total_vs_dec2007 <- if (!is.na(cur_cpi_real) && !is.na(dec2007_val) && dec2007_val != 0) {
+      ((cur_cpi_real - dec2007_val) / dec2007_val) * 100
+    } else NA_real_
+
+    pandemic_months <- seq(as.Date("2019-01-01"), as.Date("2019-12-01"), by = "month")
+    pandemic_avg <- .avg_by_dates(cpi_months, cpi_real, pandemic_months)
+    wages_cpi_total_vs_pandemic <- if (!is.na(cur_cpi_real) && !is.na(pandemic_avg) && pandemic_avg != 0) {
+      ((cur_cpi_real - pandemic_avg) / pandemic_avg) * 100
+    } else NA_real_
+  } else {
+    latest_wages_cpi <- latest_regular_cpi <- NA_real_
+    wages_cpi_change_q <- wages_cpi_change_y <- wages_cpi_change_covid <- wages_cpi_change_election <- NA_real_
+    wages_cpi_total_vs_dec2007 <- wages_cpi_total_vs_pandemic <- NA_real_
   }
 
-  # Column indices for A01 Sheet 2
-  COL_EMP16 <- 2; COL_UNEMP16 <- 4; COL_UNEMP_RT <- 5; COL_EMP_RT <- 11
-  COL_INACT <- 16; COL_INACT_RT <- 17; COL_5064 <- 56; COL_5064_RT <- 57
-
-  m_emp16   <- .compute_lfs(tbl_s2, COL_EMP16)
-  m_emprt   <- .compute_lfs(tbl_s2, COL_EMP_RT)
-  m_unemp16 <- .compute_lfs(tbl_s2, COL_UNEMP16)
-  m_unemprt <- .compute_lfs(tbl_s2, COL_UNEMP_RT)
-  m_inact   <- .compute_lfs(tbl_s2, COL_INACT)
-  m_inactrt <- .compute_lfs(tbl_s2, COL_INACT_RT)
-  m_5064    <- .compute_lfs(tbl_s2, COL_5064)
-  m_5064rt  <- .compute_lfs(tbl_s2, COL_5064_RT)
-
-  # assign to target env
-  assign("emp16_cur",  m_emp16$cur,  envir = target_env)
-  assign("emp16_dq",   m_emp16$dq,   envir = target_env)
-  assign("emp16_dy",   m_emp16$dy,   envir = target_env)
-  assign("emp16_dc",   m_emp16$dc,   envir = target_env)
-  assign("emp16_de",   m_emp16$de,   envir = target_env)
-
-  assign("emp_rt_cur", m_emprt$cur,  envir = target_env)
-  assign("emp_rt_dq",  m_emprt$dq,   envir = target_env)
-  assign("emp_rt_dy",  m_emprt$dy,   envir = target_env)
-  assign("emp_rt_dc",  m_emprt$dc,   envir = target_env)
-  assign("emp_rt_de",  m_emprt$de,   envir = target_env)
-
-  assign("unemp16_cur",  m_unemp16$cur,  envir = target_env)
-  assign("unemp16_dq",   m_unemp16$dq,   envir = target_env)
-  assign("unemp16_dy",   m_unemp16$dy,   envir = target_env)
-  assign("unemp16_dc",   m_unemp16$dc,   envir = target_env)
-  assign("unemp16_de",   m_unemp16$de,   envir = target_env)
-
-  assign("unemp_rt_cur", m_unemprt$cur,  envir = target_env)
-  assign("unemp_rt_dq",  m_unemprt$dq,   envir = target_env)
-  assign("unemp_rt_dy",  m_unemprt$dy,   envir = target_env)
-  assign("unemp_rt_dc",  m_unemprt$dc,   envir = target_env)
-  assign("unemp_rt_de",  m_unemprt$de,   envir = target_env)
-
-  assign("inact_cur",    m_inact$cur,   envir = target_env)
-  assign("inact_dq",     m_inact$dq,    envir = target_env)
-  assign("inact_dy",     m_inact$dy,    envir = target_env)
-  assign("inact_dc",     m_inact$dc,    envir = target_env)
-  assign("inact_de",     m_inact$de,    envir = target_env)
-
-  assign("inact_rt_cur", m_inactrt$cur, envir = target_env)
-  assign("inact_rt_dq",  m_inactrt$dq,  envir = target_env)
-  assign("inact_rt_dy",  m_inactrt$dy,  envir = target_env)
-  assign("inact_rt_dc",  m_inactrt$dc,  envir = target_env)
-  assign("inact_rt_de",  m_inactrt$de,  envir = target_env)
-
-  assign("inact5064_cur",    m_5064$cur,   envir = target_env)
-  assign("inact5064_dq",     m_5064$dq,    envir = target_env)
-  assign("inact5064_dy",     m_5064$dy,    envir = target_env)
-  assign("inact5064_dc",     m_5064$dc,    envir = target_env)
-  assign("inact5064_de",     m_5064$de,    envir = target_env)
-
-  assign("inact5064_rt_cur", m_5064rt$cur, envir = target_env)
-  assign("inact5064_rt_dq",  m_5064rt$dq,  envir = target_env)
-  assign("inact5064_rt_dy",  m_5064rt$dy,  envir = target_env)
-  assign("inact5064_rt_dc",  m_5064rt$dc,  envir = target_env)
-  assign("inact5064_rt_de",  m_5064rt$de,  envir = target_env)
+  assign("latest_wages_cpi",           latest_wages_cpi,           envir = target_env)
+  assign("latest_regular_cpi",         latest_regular_cpi,         envir = target_env)
+  assign("wages_cpi_change_q",         wages_cpi_change_q,         envir = target_env)
+  assign("wages_cpi_change_y",         wages_cpi_change_y,         envir = target_env)
+  assign("wages_cpi_change_covid",     wages_cpi_change_covid,     envir = target_env)
+  assign("wages_cpi_change_election",  wages_cpi_change_election,  envir = target_env)
+  assign("wages_cpi_total_vs_dec2007", wages_cpi_total_vs_dec2007, envir = target_env)
+  assign("wages_cpi_total_vs_pandemic", wages_cpi_total_vs_pandemic, envir = target_env)
 
   # ==========================================================================
-  # VACANCIES (A01 Sheet 19)
+  # A01 — Sheet "19": Vacancies
+  # Columns: A(1)=period text (3-month rolling), C(3)=level in thousands
   # ==========================================================================
 
-  if (nrow(tbl_19) > 0) {
-    end_vac <- cm %m-% months(1)
-    vac_cur <- .val_by_label(tbl_19, .make_lfs_table_label(end_vac), 3)
-    vac_dq  <- vac_cur - .val_by_label(tbl_19, .make_lfs_table_label(end_vac %m-% months(3)), 3)
-    vac_dy  <- vac_cur - .val_by_label(tbl_19, .make_lfs_table_label(end_vac %m-% months(12)), 3)
-    vac_dc  <- vac_cur - .val_by_label(tbl_19, "Jan-Mar 2020", 3)
-    vac_de  <- vac_cur - .val_by_label(tbl_19, ELECTION_LABEL, 3)
+  tbl_19 <- if (!is.null(file_a01)) .read_sheet(file_a01, "19") else data.frame()
+
+  # Vacancies: use LFS-aligned period for dashboard consistency
+  vac_end <- lfs_end_cur  # e.g. Dec 2025 → "Oct-Dec 2025" for Feb 2026 release
+  vac_lab_cur   <- .lfs_label(vac_end)
+  vac_lab_q     <- .lfs_label(vac_end %m-% months(3))
+  vac_lab_y     <- .lfs_label(vac_end %m-% months(12))
+  vac_lab_covid <- "Jan-Mar 2020"
+  vac_lab_elec  <- .lfs_label(as.Date("2024-06-01"))  # "Apr-Jun 2024"
+
+  if (nrow(tbl_19) > 0 && ncol(tbl_19) >= 3) {
+    r_cur   <- .find_row(tbl_19, vac_lab_cur)
+    vac_cur <- .cell_num(tbl_19, r_cur, 3)
+    vac_dq  <- vac_cur - .cell_num(tbl_19, .find_row(tbl_19, vac_lab_q), 3)
+    vac_dy  <- vac_cur - .cell_num(tbl_19, .find_row(tbl_19, vac_lab_y), 3)
+    vac_dc  <- vac_cur - .cell_num(tbl_19, .find_row(tbl_19, vac_lab_covid), 3)
+    vac_de  <- vac_cur - .cell_num(tbl_19, .find_row(tbl_19, vac_lab_elec), 3)
   } else {
     vac_cur <- vac_dq <- vac_dy <- vac_dc <- vac_de <- NA_real_
-    end_vac <- anchor_m
   }
 
   assign("vac_cur", vac_cur, envir = target_env)
@@ -236,43 +375,84 @@ run_calculations_from_excel <- function(manual_month,
   assign("vac_dy",  vac_dy,  envir = target_env)
   assign("vac_dc",  vac_dc,  envir = target_env)
   assign("vac_de",  vac_de,  envir = target_env)
-  assign("vac", list(cur = vac_cur, dq = vac_dq, dy = vac_dy, dc = vac_dc, de = vac_de, end = end_vac), envir = target_env)
+  assign("vac", list(cur = vac_cur, dq = vac_dq, dy = vac_dy,
+                     dc = vac_dc, de = vac_de, end = vac_end), envir = target_env)
 
   # ==========================================================================
-  # PAYROLL (RTISA Sheet 2)
+  # A01 — Sheet "18": Days lost to labour disputes
+  # Columns: A(1)=period, B(2)=thousands (monthly)
   # ==========================================================================
 
-  if (nrow(rtisa_s2) > 0 && ncol(rtisa_s2) >= 2) {
-    rtisa_months <- .detect_dates(rtisa_s2[[1]])
-    rtisa_vals <- suppressWarnings(as.numeric(gsub("[^0-9.-]", "", as.character(rtisa_s2[[2]]))))
+  tbl_18 <- if (!is.null(file_a01)) .read_sheet(file_a01, "18") else data.frame()
+
+  if (nrow(tbl_18) > 0 && ncol(tbl_18) >= 2) {
+    # Strip revision markers [r], [p], [x] from text before date parsing
+    dl_raw <- gsub("\\s*\\[.*?\\]\\s*", "", as.character(tbl_18[[1]]))
+    dl_dates <- .detect_dates(dl_raw)
+    dl_vals  <- suppressWarnings(as.numeric(gsub("[^0-9.-]", "", as.character(tbl_18[[2]]))))
+    valid_idx <- which(!is.na(dl_dates) & !is.na(dl_vals))
+    if (length(valid_idx) > 0) {
+      last_idx <- valid_idx[length(valid_idx)]
+      days_lost_cur   <- dl_vals[last_idx]
+      days_lost_label <- format(dl_dates[last_idx], "%B %Y")
+    } else {
+      days_lost_cur <- NA_real_
+      days_lost_label <- ""
+    }
+  } else {
+    days_lost_cur <- NA_real_
+    days_lost_label <- ""
+  }
+
+  assign("days_lost_cur",   days_lost_cur,   envir = target_env)
+  assign("days_lost_label", days_lost_label, envir = target_env)
+
+  # ==========================================================================
+  # RTISA — Payrolled employees
+  # Sheet "1. Payrolled employees (UK)": A(1)=date text, B(2)=raw count
+  # ==========================================================================
+
+  rtisa_pay <- if (!is.null(file_rtisa)) {
+    .read_sheet(file_rtisa, "1. Payrolled employees (UK)")
+  } else data.frame()
+
+  if (nrow(rtisa_pay) > 0 && ncol(rtisa_pay) >= 2) {
+    # Parse text dates like "January 2026"
+    rtisa_text <- trimws(as.character(rtisa_pay[[1]]))
+    rtisa_parsed <- suppressWarnings(lubridate::parse_date_time(rtisa_text, orders = c("B Y", "bY", "BY")))
+    rtisa_months <- floor_date(as.Date(rtisa_parsed), "month")
+    rtisa_vals <- suppressWarnings(as.numeric(gsub("[^0-9.-]", "", as.character(rtisa_pay[[2]]))))
+
+    # Build clean data frame
     pay_df <- data.frame(m = rtisa_months, v = rtisa_vals, stringsAsFactors = FALSE)
     pay_df <- pay_df[!is.na(pay_df$m) & !is.na(pay_df$v), ]
     pay_df <- pay_df[order(pay_df$m), ]
 
+    # 3-month averages aligned to LFS quarter
     months_cur  <- c(cm %m-% months(4), cm %m-% months(3), cm %m-% months(2))
     months_prev <- c(cm %m-% months(7), cm %m-% months(6), cm %m-% months(5))
     months_yago <- months_cur %m-% months(12)
 
-    pay_cur_raw <- .get_avg(pay_df, months_cur)
-    pay_prev3   <- .get_avg(pay_df, months_prev)
-    pay_yago3   <- .get_avg(pay_df, months_yago)
+    pay_cur_raw <- .avg_by_dates(pay_df$m, pay_df$v, months_cur)
+    pay_prev3   <- .avg_by_dates(pay_df$m, pay_df$v, months_prev)
+    pay_yago3   <- .avg_by_dates(pay_df$m, pay_df$v, months_yago)
 
     payroll_cur <- if (!is.na(pay_cur_raw)) pay_cur_raw / 1000 else NA_real_
     payroll_dq  <- if (!is.na(pay_cur_raw) && !is.na(pay_prev3)) (pay_cur_raw - pay_prev3) / 1000 else NA_real_
     payroll_dy  <- if (!is.na(pay_cur_raw) && !is.na(pay_yago3)) (pay_cur_raw - pay_yago3) / 1000 else NA_real_
 
-    covid_base <- .get_avg(pay_df, as.Date(c("2019-12-01", "2020-01-01", "2020-02-01")))
+    covid_base <- .avg_by_dates(pay_df$m, pay_df$v, as.Date(c("2019-12-01", "2020-01-01", "2020-02-01")))
     payroll_dc <- if (!is.na(pay_cur_raw) && !is.na(covid_base)) (pay_cur_raw - covid_base) / 1000 else NA_real_
 
-    elec_base <- .get_avg(pay_df, as.Date(c("2024-04-01", "2024-05-01", "2024-06-01")))
+    elec_base <- .avg_by_dates(pay_df$m, pay_df$v, as.Date(c("2024-04-01", "2024-05-01", "2024-06-01")))
     payroll_de <- if (!is.na(payroll_cur) && !is.na(elec_base)) payroll_cur - (elec_base / 1000) else NA_real_
 
-    # flash (single month)
+    # Flash (single latest month)
     flash_anchor <- anchor_m
-    flash_val <- pay_df$v[match(anchor_m, pay_df$m)]
-    flash_prev_m <- pay_df$v[match(anchor_m %m-% months(1), pay_df$m)]
-    flash_prev_y <- pay_df$v[match(anchor_m %m-% months(12), pay_df$m)]
-    flash_elec <- pay_df$v[match(as.Date("2024-06-01"), pay_df$m)]
+    flash_val    <- .val_by_date(pay_df$m, pay_df$v, anchor_m)
+    flash_prev_m <- .val_by_date(pay_df$m, pay_df$v, anchor_m %m-% months(1))
+    flash_prev_y <- .val_by_date(pay_df$m, pay_df$v, anchor_m %m-% months(12))
+    flash_elec   <- .val_by_date(pay_df$m, pay_df$v, as.Date("2024-06-01"))
 
     payroll_flash_cur <- if (!is.na(flash_val)) flash_val / 1e6 else NA_real_
     payroll_flash_dm  <- if (!is.na(flash_val) && !is.na(flash_prev_m)) (flash_val - flash_prev_m) / 1000 else NA_real_
@@ -295,202 +475,34 @@ run_calculations_from_excel <- function(manual_month,
   assign("payroll_flash_de",  payroll_flash_de,  envir = target_env)
 
   # ==========================================================================
-  # WAGES NOMINAL (A01 Sheet 13 + 15)
+  # RTISA — Sheet "23. Employees (Industry)": Sector payroll
+  # Columns: A(1)=date, H(8)=retail, J(10)=hospitality, R(18)=health
   # ==========================================================================
 
-  if (nrow(tbl_13) > 0 && ncol(tbl_13) >= 4) {
-    nom_months <- .detect_dates(tbl_13[[1]])
-    nom_v2 <- suppressWarnings(as.numeric(gsub("[^0-9.-]", "", as.character(tbl_13[[2]]))))
-    nom_v4 <- suppressWarnings(as.numeric(gsub("[^0-9.-]", "", as.character(tbl_13[[4]]))))
-    nom_df <- data.frame(m = nom_months, v2 = nom_v2, v4 = nom_v4, stringsAsFactors = FALSE)
-    nom_df <- nom_df[!is.na(nom_df$m), ]
-    nom_df <- nom_df[order(nom_df$m), ]
+  rtisa_sec <- if (!is.null(file_rtisa)) {
+    .read_sheet(file_rtisa, "23. Employees (Industry)")
+  } else data.frame()
 
-    latest_wages <- .pick_vals(nom_df$m, nom_df$v4, anchor_m)[1]
+  if (nrow(rtisa_sec) > 0 && ncol(rtisa_sec) >= 18) {
+    sec_text <- trimws(as.character(rtisa_sec[[1]]))
+    sec_parsed <- suppressWarnings(lubridate::parse_date_time(sec_text, orders = c("B Y", "bY", "BY")))
+    sec_months <- floor_date(as.Date(sec_parsed), "month")
 
-    win3 <- c(anchor_m, anchor_m %m-% months(1), anchor_m %m-% months(2))
-    prev3 <- c(anchor_m %m-% months(3), anchor_m %m-% months(4), anchor_m %m-% months(5))
-    yago3 <- win3 %m-% months(12)
-    covid3 <- as.Date(c("2019-12-01", "2020-01-01", "2020-02-01"))
-    election3 <- as.Date(c("2024-04-01", "2024-05-01", "2024-06-01"))
+    sec_retail <- suppressWarnings(as.numeric(gsub("[^0-9.-]", "", as.character(rtisa_sec[[8]]))))
+    sec_hosp   <- suppressWarnings(as.numeric(gsub("[^0-9.-]", "", as.character(rtisa_sec[[10]]))))
+    sec_health <- suppressWarnings(as.numeric(gsub("[^0-9.-]", "", as.character(rtisa_sec[[18]]))))
 
-    .wage_change <- function(a_months, b_months) {
-      a <- .pick_avg(nom_df$m, nom_df$v2, a_months)
-      b <- .pick_avg(nom_df$m, nom_df$v2, b_months)
-      if (is.na(a) || is.na(b)) NA_real_ else (a - b) * 52
+    .sector_dy <- function(vals) {
+      now  <- .val_by_date(sec_months, vals, anchor_m)
+      yago <- .val_by_date(sec_months, vals, anchor_m %m-% months(12))
+      if (!is.na(now) && !is.na(yago)) (now - yago) / 1000 else NA_real_
     }
 
-    wages_change_q <- .wage_change(win3, prev3)
-    wages_change_y <- .wage_change(win3, yago3)
-    wages_change_covid <- .wage_change(win3, covid3)
-    wages_change_election <- .wage_change(win3, election3)
-
-    # quarterly percentage point change for narrative
-    prev_q_val <- .pick_vals(nom_df$m, nom_df$v4, anchor_m %m-% months(3))[1]
-    wages_total_qchange <- if (!is.na(latest_wages) && !is.na(prev_q_val)) latest_wages - prev_q_val else NA_real_
+    retail_dy <- .sector_dy(sec_retail)
+    hosp_dy   <- .sector_dy(sec_hosp)
+    health_dy <- .sector_dy(sec_health)
   } else {
-    latest_wages <- wages_change_q <- wages_change_y <- NA_real_
-    wages_change_covid <- wages_change_election <- wages_total_qchange <- NA_real_
-  }
-
-  # A01 Sheet 15 - regular pay
-  if (nrow(tbl_15) > 0 && ncol(tbl_15) >= 4) {
-    a01s15_dates <- .detect_dates(tbl_15[[1]])
-    a01s15_v4 <- suppressWarnings(as.numeric(gsub("[^0-9.-]", "", as.character(tbl_15[[4]]))))
-    latest_regular_cash <- .pick_vals(a01s15_dates, a01s15_v4, anchor_m)[1]
-
-    prev_q_reg <- .pick_vals(a01s15_dates, a01s15_v4, anchor_m %m-% months(3))[1]
-    wages_reg_qchange <- if (!is.na(latest_regular_cash) && !is.na(prev_q_reg)) latest_regular_cash - prev_q_reg else NA_real_
-  } else {
-    latest_regular_cash <- NA_real_
-    wages_reg_qchange <- NA_real_
-  }
-
-  # public/private sectors not available from A01 sheets directly - set NA
-  wages_total_public  <- NA_real_
-  wages_total_private <- NA_real_
-  wages_reg_public    <- NA_real_
-  wages_reg_private   <- NA_real_
-
-  assign("latest_wages",          latest_wages,          envir = target_env)
-  assign("wages_change_q",        wages_change_q,        envir = target_env)
-  assign("wages_change_y",        wages_change_y,        envir = target_env)
-  assign("wages_change_covid",    wages_change_covid,    envir = target_env)
-  assign("wages_change_election", wages_change_election, envir = target_env)
-  assign("wages_total_public",    wages_total_public,    envir = target_env)
-  assign("wages_total_private",   wages_total_private,   envir = target_env)
-  assign("wages_total_qchange",   wages_total_qchange,   envir = target_env)
-  assign("latest_regular_cash",   latest_regular_cash,   envir = target_env)
-  assign("wages_reg_public",      wages_reg_public,      envir = target_env)
-  assign("wages_reg_private",     wages_reg_private,     envir = target_env)
-  assign("wages_reg_qchange",     wages_reg_qchange,     envir = target_env)
-
-  # ==========================================================================
-  # WAGES CPI (X09 "AWE Real_CPI")
-  # ==========================================================================
-
-  if (nrow(tbl_cpi) > 0 && ncol(tbl_cpi) >= 9) {
-    cpi_months <- .parse_cpi_dates(tbl_cpi[[1]])
-    cpi_v2 <- suppressWarnings(as.numeric(gsub("[^0-9.-]", "", as.character(tbl_cpi[[2]]))))
-    cpi_v4 <- suppressWarnings(as.numeric(gsub("[^0-9.-]", "", as.character(tbl_cpi[[4]]))))
-    cpi_v9 <- suppressWarnings(as.numeric(gsub("[^0-9.-]", "", as.character(tbl_cpi[[9]]))))
-    cpi_df <- data.frame(m = cpi_months, v2 = cpi_v2, v4 = cpi_v4, v9 = cpi_v9, stringsAsFactors = FALSE)
-    cpi_df <- cpi_df[!is.na(cpi_df$m), ]
-    cpi_df <- cpi_df[order(cpi_df$m), ]
-
-    latest_wages_cpi  <- .pick_vals(cpi_df$m, cpi_df$v4, anchor_m)[1]
-    latest_regular_cpi <- .pick_vals(cpi_df$m, cpi_df$v9, anchor_m)[1]
-
-    win3 <- c(anchor_m, anchor_m %m-% months(1), anchor_m %m-% months(2))
-    prev3 <- c(anchor_m %m-% months(3), anchor_m %m-% months(4), anchor_m %m-% months(5))
-    yago3 <- win3 %m-% months(12)
-    covid3 <- as.Date(c("2019-12-01", "2020-01-01", "2020-02-01"))
-    election3 <- as.Date(c("2024-04-01", "2024-05-01", "2024-06-01"))
-
-    .cpi_change <- function(a_months, b_months) {
-      a <- .pick_avg(cpi_df$m, cpi_df$v2, a_months)
-      b <- .pick_avg(cpi_df$m, cpi_df$v2, b_months)
-      if (is.na(a) || is.na(b)) NA_real_ else (a - b) * 52
-    }
-
-    wages_cpi_change_q <- .cpi_change(win3, prev3)
-    wages_cpi_change_y <- .cpi_change(win3, yago3)
-    wages_cpi_change_covid <- .cpi_change(win3, covid3)
-    wages_cpi_change_election <- .cpi_change(win3, election3)
-
-    # vs Dec 2007 and vs pandemic (2019 avg)
-    dec2007_val <- .pick_vals(cpi_df$m, cpi_df$v2, as.Date("2007-12-01"))[1]
-    cur_cpi_real <- .pick_avg(cpi_df$m, cpi_df$v2, win3)
-    wages_cpi_total_vs_dec2007 <- if (!is.na(cur_cpi_real) && !is.na(dec2007_val) && dec2007_val != 0) {
-      ((cur_cpi_real - dec2007_val) / dec2007_val) * 100
-    } else NA_real_
-
-    pandemic_months <- seq(as.Date("2019-01-01"), as.Date("2019-12-01"), by = "month")
-    pandemic_avg <- .pick_avg(cpi_df$m, cpi_df$v2, pandemic_months)
-    wages_cpi_total_vs_pandemic <- if (!is.na(cur_cpi_real) && !is.na(pandemic_avg) && pandemic_avg != 0) {
-      ((cur_cpi_real - pandemic_avg) / pandemic_avg) * 100
-    } else NA_real_
-  } else {
-    latest_wages_cpi <- latest_regular_cpi <- NA_real_
-    wages_cpi_change_q <- wages_cpi_change_y <- wages_cpi_change_covid <- wages_cpi_change_election <- NA_real_
-    wages_cpi_total_vs_dec2007 <- wages_cpi_total_vs_pandemic <- NA_real_
-  }
-
-  assign("latest_wages_cpi",           latest_wages_cpi,           envir = target_env)
-  assign("latest_regular_cpi",         latest_regular_cpi,         envir = target_env)
-  assign("wages_cpi_change_q",         wages_cpi_change_q,         envir = target_env)
-  assign("wages_cpi_change_y",         wages_cpi_change_y,         envir = target_env)
-  assign("wages_cpi_change_covid",     wages_cpi_change_covid,     envir = target_env)
-  assign("wages_cpi_change_election",  wages_cpi_change_election,  envir = target_env)
-  assign("wages_cpi_total_vs_dec2007", wages_cpi_total_vs_dec2007, envir = target_env)
-  assign("wages_cpi_total_vs_pandemic", wages_cpi_total_vs_pandemic, envir = target_env)
-
-  # ==========================================================================
-  # DAYS LOST (A01 Sheet 18)
-  # ==========================================================================
-
-  if (nrow(tbl_18) > 0 && ncol(tbl_18) >= 2) {
-    days_lost_cur <- .safe_last(.get_series(tbl_18, 2))
-    # try to get the month label from col 1
-    dl_dates <- .detect_dates(tbl_18[[1]])
-    dl_vals <- suppressWarnings(as.numeric(gsub("[^0-9.-]", "", as.character(tbl_18[[2]]))))
-    valid_idx <- which(!is.na(dl_dates) & !is.na(dl_vals))
-    days_lost_label <- if (length(valid_idx) > 0) format(dl_dates[tail(valid_idx, 1)], "%B %Y") else ""
-  } else {
-    days_lost_cur <- NA_real_
-    days_lost_label <- ""
-  }
-
-  assign("days_lost_cur",   days_lost_cur,   envir = target_env)
-  assign("days_lost_label", days_lost_label, envir = target_env)
-
-  # ==========================================================================
-  # REDUNDANCY (A01 Sheet 10)
-  # ==========================================================================
-
-  if (nrow(tbl_10) > 0 && ncol(tbl_10) >= 3) {
-    lab_cur <- .make_lfs_table_label(anchor_m)
-    lab_q   <- .make_lfs_table_label(anchor_m %m-% months(3))
-    lab_y   <- .make_lfs_table_label(anchor_m %m-% months(12))
-
-    redund_cur <- .val_by_label(tbl_10, lab_cur, 3)
-    redund_dq  <- redund_cur - .val_by_label(tbl_10, lab_q, 3)
-    redund_dy  <- redund_cur - .val_by_label(tbl_10, lab_y, 3)
-    redund_dc  <- redund_cur - .val_by_label(tbl_10, COVID_LFS_LABEL, 3)
-    redund_de  <- redund_cur - .val_by_label(tbl_10, ELECTION_LABEL, 3)
-  } else {
-    redund_cur <- redund_dq <- redund_dy <- redund_dc <- redund_de <- NA_real_
-  }
-
-  assign("redund_cur", redund_cur, envir = target_env)
-  assign("redund_dq",  redund_dq,  envir = target_env)
-  assign("redund_dy",  redund_dy,  envir = target_env)
-  assign("redund_dc",  redund_dc,  envir = target_env)
-  assign("redund_de",  redund_de,  envir = target_env)
-
-  # ==========================================================================
-  # SECTOR PAYROLL (RTISA Sheet 24)
-  # ==========================================================================
-
-  if (nrow(rtisa_s24) > 0 && ncol(rtisa_s24) >= 18) {
-    rtisa24_dates <- .detect_dates(rtisa_s24[[1]])
-
-    colH <- suppressWarnings(as.numeric(gsub("[^0-9.-]", "", as.character(rtisa_s24[[8]]))))
-    colI <- suppressWarnings(as.numeric(gsub("[^0-9.-]", "", as.character(rtisa_s24[[9]]))))
-    colR <- suppressWarnings(as.numeric(gsub("[^0-9.-]", "", as.character(rtisa_s24[[18]]))))
-
-    valH_now  <- .pick_vals(rtisa24_dates, colH, anchor_m)[1]
-    valI_now  <- .pick_vals(rtisa24_dates, colI, anchor_m)[1]
-    valR_now  <- .pick_vals(rtisa24_dates, colR, anchor_m)[1]
-    valH_yago <- .pick_vals(rtisa24_dates, colH, anchor_m %m-% months(12))[1]
-    valI_yago <- .pick_vals(rtisa24_dates, colI, anchor_m %m-% months(12))[1]
-    valR_yago <- .pick_vals(rtisa24_dates, colR, anchor_m %m-% months(12))[1]
-
-    hosp_dy   <- if (!is.na(valH_now) && !is.na(valH_yago)) (valH_now - valH_yago) / 1000 else NA_real_
-    retail_dy <- if (!is.na(valI_now) && !is.na(valI_yago)) (valI_now - valI_yago) / 1000 else NA_real_
-    health_dy <- if (!is.na(valR_now) && !is.na(valR_yago)) (valR_now - valR_yago) / 1000 else NA_real_
-  } else {
-    hosp_dy <- retail_dy <- health_dy <- NA_real_
+    retail_dy <- hosp_dy <- health_dy <- NA_real_
   }
 
   assign("hosp_dy",   hosp_dy,   envir = target_env)
@@ -510,46 +522,70 @@ run_calculations_from_excel <- function(manual_month,
   assign("health_de", NA_real_,  envir = target_env)
 
   # ==========================================================================
-  # HR1 (Sheet "1a")
+  # HR1 — Sheet "1a": Redundancy notifications
+  # Columns: A(1)=datetime, M(13)=GB total
   # ==========================================================================
 
+  hr1_tbl <- if (!is.null(file_hr1)) .read_sheet(file_hr1, "1a") else data.frame()
+
   if (nrow(hr1_tbl) > 0 && ncol(hr1_tbl) >= 13) {
-    hr1_vals <- suppressWarnings(as.numeric(gsub("[^0-9.-]", "", as.character(hr1_tbl[[13]]))))
-    hr1_cur <- .safe_last(hr1_vals[!is.na(hr1_vals)])
+    hr1_dates <- .detect_dates(hr1_tbl[[1]])
+    hr1_vals  <- suppressWarnings(as.numeric(gsub("[^0-9.-]", "", as.character(hr1_tbl[[13]]))))
+
+    valid_hr1 <- which(!is.na(hr1_dates) & !is.na(hr1_vals))
+    if (length(valid_hr1) > 0) {
+      last_hr1 <- valid_hr1[length(valid_hr1)]
+      hr1_cur <- hr1_vals[last_hr1]
+      hr1_month_label <- format(hr1_dates[last_hr1], "%B %Y")
+
+      # Month-on-month change
+      prev_hr1 <- if (length(valid_hr1) >= 2) {
+        hr1_vals[valid_hr1[length(valid_hr1) - 1]]
+      } else NA_real_
+      hr1_dm <- if (!is.na(hr1_cur) && !is.na(prev_hr1)) hr1_cur - prev_hr1 else NA_real_
+    } else {
+      hr1_cur <- NA_real_
+      hr1_dm <- NA_real_
+      hr1_month_label <- ""
+    }
   } else {
     hr1_cur <- NA_real_
+    hr1_dm <- NA_real_
+    hr1_month_label <- ""
   }
 
   assign("hr1_cur", hr1_cur, envir = target_env)
-  assign("hr1_dm",  NA_real_, envir = target_env)
+  assign("hr1_dm",  hr1_dm,  envir = target_env)
   assign("hr1_dy",  NA_real_, envir = target_env)
   assign("hr1_dc",  NA_real_, envir = target_env)
   assign("hr1_de",  NA_real_, envir = target_env)
+  assign("hr1_month_label", hr1_month_label, envir = target_env)
 
   # ==========================================================================
   # LABELS
   # ==========================================================================
 
-  lfs_period_label <- lfs_label_narrative(m_emprt$end)
-  lfs_period_short_label <- make_lfs_label(m_emprt$end)
-  vacancies_period_short_label <- make_lfs_label(end_vac)
-  payroll_flash_label <- format(flash_anchor, "%B %Y")
-  hr1_month_label <- ""  # not reliably available from Excel without date parsing
+  lfs_period_label <- lfs_label_narrative(lfs_end_cur)  # "October 2025 to December 2025"
+  lfs_period_short_label <- make_lfs_label(lfs_end_cur) # "Oct-Dec 2025"
+  vacancies_period_label <- lfs_label_narrative(vac_end)
+  vacancies_period_short_label <- make_lfs_label(vac_end)
+  payroll_flash_label_val <- format(flash_anchor, "%B %Y")
   sector_month_label <- format(anchor_m, "%B %Y")
 
   assign("lfs_period_label",             lfs_period_label,             envir = target_env)
   assign("lfs_period_short_label",       lfs_period_short_label,       envir = target_env)
+  assign("vacancies_period_label",       vacancies_period_label,       envir = target_env)
   assign("vacancies_period_short_label", vacancies_period_short_label, envir = target_env)
-  assign("payroll_flash_label",          payroll_flash_label,          envir = target_env)
+  assign("payroll_flash_label",          payroll_flash_label_val,      envir = target_env)
   assign("payroll_month_label",          format(anchor_m, "%B %Y"),    envir = target_env)
   assign("hr1_month_label",             hr1_month_label,              envir = target_env)
   assign("sector_month_label",          sector_month_label,           envir = target_env)
   assign("manual_month",                manual_month,                 envir = target_env)
 
-  # inactivity driver text (not available from Excel)
+  # Extra variables needed by downstream consumers
   assign("inact_driver_text", "", envir = target_env)
 
-  # Create payroll list object (needed by summary.R fallback when calculate_payroll() is unavailable)
+  # Payroll list object (needed by summary.R fallback)
   assign("payroll", list(
     cur = payroll_cur, dq = payroll_dq, dy = payroll_dy,
     dc = payroll_dc, de = payroll_de,
@@ -558,7 +594,7 @@ run_calculations_from_excel <- function(manual_month,
     flash_anchor = flash_anchor, anchor = anchor_m
   ), envir = target_env)
 
-  # Create wages_nom list object (needed by summary.R for wages period label)
+  # Wages nominal list object (needed by summary.R for period label)
   assign("wages_nom", list(
     total = list(cur = latest_wages, dq = wages_change_q,
                  dy = wages_change_y, dc = wages_change_covid,
