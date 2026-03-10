@@ -658,18 +658,16 @@ server <- function(input, output, session) {
 
   # auto-detect uploaded files by filename and sheet contents
   .detect_file_type <- function(name, path) {
-    nm <- tolower(name)
-    # match by filename first
-    if (grepl("a01", nm)) return("a01")
-    if (grepl("hr1", nm)) return("hr1")
-    if (grepl("x09", nm)) return("x09")
-    if (grepl("rtisa", nm)) return("rtisa")
-    # fallback: match by sheet names
-    sheets <- tryCatch(tolower(readxl::excel_sheets(path)), error = function(e) character(0))
-    if (any(sheets %in% c("1", "10", "13", "15", "19"))) return("a01")
-    if (any(sheets %in% c("1a"))) return("hr1")
-    if (any(grepl("awe real_cpi", sheets))) return("x09")
-    if (any(grepl("payrolled employees", sheets))) return("rtisa")
+    # Strip extension and normalise: lowercase, remove spaces/punctuation
+    nm <- tolower(tools::file_path_sans_ext(name))
+    nm_clean <- gsub("[^a-z0-9]", "", nm)
+    # Exact known dataset codes (must appear as the whole name or delimited token)
+    if (grepl("\\ba01\\b", nm) || nm_clean == "a01") return("a01")
+    if (grepl("\\bhr1\\b", nm) || nm_clean == "hr1") return("hr1")
+    if (grepl("\\bx09\\b", nm) || nm_clean == "x09") return("x09")
+    if (grepl("\\brtisa\\b", nm) || nm_clean == "rtisa") return("rtisa")
+    # No filename match — do NOT fall back to sheet-name guessing.
+    # Require the file to be named with a recognised dataset code.
     NULL
   }
 
