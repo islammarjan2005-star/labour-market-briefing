@@ -53,9 +53,9 @@ generate_top_ten <- function() {
     '(including bonuses) and {fmt_pct(latest_regular_cash)} for regular pay (excluding bonuses) ',
     'in {lfs_period_label}. Public sector changes of {fmt_pct(wages_total_public)} and ',
     '{fmt_pct(wages_reg_public)} respectively are {fmt_one_dec(abs(pub_priv_diff_reg))}pp {pub_priv_dir} than the private sector. ',
-    'Wage growth is {ifelse(wages_total_qchange < 0, "easing", "accelerating")}, with this representing a quarterly ',
-    '{ifelse(wages_total_qchange >= 0, "increase", "decline")} of {fmt_one_dec(abs(wages_total_qchange))}pp ',
-    'and a quarterly {ifelse(wages_reg_qchange >= 0, "increase", "decline")} of {fmt_one_dec(abs(wages_reg_qchange))}pp respectively.',
+    'Wage growth is {ifelse(is.na(wages_total_qchange) || wages_total_qchange < 0, "easing", "accelerating")}, with this representing a quarterly ',
+    '{ifelse(is.na(wages_total_qchange) || wages_total_qchange >= 0, "increase", "decline")} of {fmt_one_dec(abs(wages_total_qchange))}pp ',
+    'and a quarterly {ifelse(is.na(wages_reg_qchange) || wages_reg_qchange >= 0, "increase", "decline")} of {fmt_one_dec(abs(wages_reg_qchange))}pp respectively.',
     .comment = ""
   )
   
@@ -153,12 +153,12 @@ generate_top_ten <- function() {
       vac_period_label <- as.character(vpl)
     }
   }
-  vac_dir <- ifelse(vac_dy < 0, "decreased", "increased")
-  vac_cur_vs_peak <- ifelse(vac_cur < 1300, "falling", "rising")
+  vac_dir <- ifelse(is.na(vac_dy) || vac_dy < 0, "decreased", "increased")
+  vac_cur_vs_peak <- ifelse(is.na(vac_cur) || vac_cur < 1300, "falling", "rising")
   vac_prepandemic_phrase <- if (!is.na(vac_dc) && vac_dc != 0) {
-    paste0("; and are ", fmt_int_1k(vac_dc * 1000), ifelse(vac_dc < 0, " below", " above"), " the pre-pandemic level")
+    paste0("; and are ", fmt_int_1k(vac_dc * 1000), ifelse(is.na(vac_dc) || vac_dc < 0, " below", " above"), " the pre-pandemic level")
   } else ""
-  vac_cur_vs_2010avg <- ifelse(vac_cur < 660, "below", "above")
+  vac_cur_vs_2010avg <- ifelse(is.na(vac_cur) || vac_cur < 660, "below", "above")
 
   line8 <- glue(
     'The number of job vacancies {vac_dir} on the year by {fmt_int_1k(vac_dy * 1000)} ',
