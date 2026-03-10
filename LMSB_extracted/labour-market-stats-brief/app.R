@@ -545,15 +545,11 @@ ui <- fluidPage(
                                                    target = "_blank", "RTISA: Payrolled employees (SA)"))
                                 ),
 
-                                div(class = "govuk-grid-row",
-                                    div(class = "govuk-grid-column-one-half",
-                                        fileInput("upload_a01", "A01 (.xlsx)", accept = ".xlsx", width = "100%"),
-                                        fileInput("upload_hr1", "HR1 (.xlsx)", accept = ".xlsx", width = "100%")
-                                    ),
-                                    div(class = "govuk-grid-column-one-half",
-                                        fileInput("upload_x09", "X09 (.xlsx)", accept = ".xlsx", width = "100%"),
-                                        fileInput("upload_rtisa", "RTISA (.xlsx)", accept = ".xlsx", width = "100%")
-                                    )
+                                div(class = "govuk-form-group",
+                                    fileInput("upload_files", "Upload Excel files (.xlsx)",
+                                              accept = ".xlsx", multiple = TRUE, width = "100%"),
+                                    div(class = "govuk-hint",
+                                        "Select up to 4 files at once. Files are auto-detected by name (e.g. a01, hr1, x09, rtisa).")
                                 ),
 
                                 uiOutput("upload_status"),
@@ -647,35 +643,73 @@ server <- function(input, output, session) {
     }
   }
 
-  # track uploads with validation
-  observeEvent(input$upload_a01, {
-    path <- input$upload_a01$datapath
-    .validate_excel(path, c("1", "10", "13", "15", "19"), "A01")
-    uploaded_files$a01 <- path
+  # auto-detect uploaded files by filename and sheet contents
+  .detect_file_type <- function(name, path) {
+    nm <- tolower(name)
+    # match by filename first
+    if (grepl("a01", nm)) return("a01")
+    if (grepl("hr1", nm)) return("hr1")
+    if (grepl("x09", nm)) return("x09")
+    if (grepl("rtisa", nm)) return("rtisa")
+    # fallback: match by sheet names
+    sheets <- tryCatch(tolower(readxl::excel_sheets(path)), error = function(e) character(0))
+    if (any(sheets %in% c("1", "10", "13", "15", "19"))) return("a01")
+    if (any(sheets %in% c("1a"))) return("hr1")
+    if (any(grepl("awe real_cpi", sheets))) return("x09")
+    if (any(grepl("payrolled employees", sheets))) return("rtisa")
+    NULL
+  }
 
-    # Immediately detect reference month from A01
-    tryCatch({
-      if (!exists(".detect_manual_month_from_a01", inherits = TRUE)) {
-        source("utils/calculations_from_excel.R", local = FALSE)
+  # track uploads — single handler for all files
+  observeEvent(input$upload_files, {
+    files <- input$upload_files
+    if (is.null(files)) return()
+
+    detected_types <- character(0)
+
+    for (i in seq_len(nrow(files))) {
+      ftype <- .detect_file_type(files$name[i], files$datapath[i])
+      if (is.null(ftype)) {
+        showNotification(
+          paste0("Could not identify file: ", files$name[i],
+                 ". Expected A01, HR1, X09, or RTISA."),
+          type = "warning", duration = 8
+        )
+        next
       }
-      detected <- .detect_manual_month_from_a01(path)
-      if (!is.null(detected)) .update_ref_month(detected)
-    }, error = function(e) NULL)
-  })
-  observeEvent(input$upload_hr1, {
-    path <- input$upload_hr1$datapath
-    .validate_excel(path, c("1a"), "HR1")
-    uploaded_files$hr1 <- path
-  })
-  observeEvent(input$upload_x09, {
-    path <- input$upload_x09$datapath
-    .validate_excel(path, c("AWE Real_CPI"), "X09")
-    uploaded_files$x09 <- path
-  })
-  observeEvent(input$upload_rtisa, {
-    path <- input$upload_rtisa$datapath
-    .validate_excel(path, c("1. Payrolled employees (UK)", "23. Employees (Industry)"), "RTISA")
-    uploaded_files$rtisa <- path
+
+      # validate and store
+      if (ftype == "a01") {
+        .validate_excel(files$datapath[i], c("1", "10", "13", "15", "19"), "A01")
+        uploaded_files$a01 <- files$datapath[i]
+        # detect reference month from A01
+        tryCatch({
+          if (!exists(".detect_manual_month_from_a01", inherits = TRUE)) {
+            source("utils/calculations_from_excel.R", local = FALSE)
+          }
+          detected <- .detect_manual_month_from_a01(files$datapath[i])
+          if (!is.null(detected)) .update_ref_month(detected)
+        }, error = function(e) NULL)
+      } else if (ftype == "hr1") {
+        .validate_excel(files$datapath[i], c("1a"), "HR1")
+        uploaded_files$hr1 <- files$datapath[i]
+      } else if (ftype == "x09") {
+        .validate_excel(files$datapath[i], c("AWE Real_CPI"), "X09")
+        uploaded_files$x09 <- files$datapath[i]
+      } else if (ftype == "rtisa") {
+        .validate_excel(files$datapath[i], c("1. Payrolled employees (UK)", "23. Employees (Industry)"), "RTISA")
+        uploaded_files$rtisa <- files$datapath[i]
+      }
+
+      detected_types <- c(detected_types, toupper(ftype))
+    }
+
+    if (length(detected_types) > 0) {
+      showNotification(
+        paste0("Detected: ", paste(detected_types, collapse = ", ")),
+        type = "message", duration = 5
+      )
+    }
   })
 
   # upload status display — per-file ticks with detected month
