@@ -273,8 +273,10 @@ generate_summary <- function() {
 
   # compute pct for flash
   pf_cur_n <- if (!is.na(pf_cur_m)) pf_cur_m * 1e6 else NA_real_
-  pf_pct_y <- if (!is.na(pf_cur_n) && !is.na(pf_dy_k)) (pf_dy_k * 1000) / (pf_cur_n - pf_dy_k * 1000) * 100 else NA_real_
-  pf_pct_m <- if (!is.na(pf_cur_n) && !is.na(pf_dm_k)) (pf_dm_k * 1000) / (pf_cur_n - pf_dm_k * 1000) * 100 else NA_real_
+  pf_base_y <- if (!is.na(pf_cur_n) && !is.na(pf_dy_k)) pf_cur_n - pf_dy_k * 1000 else NA_real_
+  pf_pct_y <- if (!is.na(pf_base_y) && pf_base_y != 0) (pf_dy_k * 1000) / pf_base_y * 100 else NA_real_
+  pf_base_m <- if (!is.na(pf_cur_n) && !is.na(pf_dm_k)) pf_cur_n - pf_dm_k * 1000 else NA_real_
+  pf_pct_m <- if (!is.na(pf_base_m) && pf_base_m != 0) (pf_dm_k * 1000) / pf_base_m * 100 else NA_real_
 
   line2 <- glue(
     "The ‘flash’ estimate for {payroll_flash_lbl} suggests payroll employees {ifelse(is.na(pf_dy_k) || pf_dy_k == 0, ‘were unchanged’, ifelse(pf_dy_k < 0, ‘fell’, ‘rose’))} by {fmt_int_1k(abs(pf_dy_k) * 1000)} ({fmt_pct_unsigned(pf_pct_y)}) on the year, ",

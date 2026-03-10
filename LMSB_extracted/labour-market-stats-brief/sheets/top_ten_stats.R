@@ -194,8 +194,9 @@ generate_top_ten <- function() {
   )
 
   # line 7: days lost
-  days_lost_month <- if (exists("days_lost_label", inherits = TRUE) && nzchar(as.character(get("days_lost_label", inherits = TRUE)))) {
-    paste0("in ", get("days_lost_label", inherits = TRUE), " ")
+  days_lost_lbl <- if (exists("days_lost_label", inherits = TRUE)) as.character(get("days_lost_label", inherits = TRUE)) else ""
+  days_lost_month <- if (nzchar(days_lost_lbl) && !is.na(days_lost_lbl) && days_lost_lbl != "NA") {
+    paste0("in ", days_lost_lbl, " ")
   } else ""
 
   line7 <- glue(
@@ -255,9 +256,13 @@ generate_top_ten <- function() {
   # line 10: hr1
   hr1_vs_prepandemic <- if (!is.na(hr1_cur) && hr1_cur < 27600) "below" else "above"
 
+  hr1_in_month <- if (nzchar(hr1_month_label) && !is.na(hr1_month_label) && hr1_month_label != "NA") {
+    paste0("in ", hr1_month_label)
+  } else ""
+
   line10 <- glue(
     'The Insolvency Service were notified of {fmt_int(hr1_cur)} ',
-    'potential redundancies in {hr1_month_label}. This is ',
+    'potential redundancies {hr1_in_month}. This is ',
     '{hr1_vs_prepandemic} the pre-pandemic average of 27,600 (Apr 2019 \u2013 Feb 2020).',
     .comment = ""
   )
