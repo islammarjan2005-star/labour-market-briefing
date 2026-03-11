@@ -28,10 +28,13 @@ if (!exists("parse_manual_month", inherits = TRUE)) {
   if (nrow(tbl) == 0) return(tbl)
 
   # ONS suppression markers that represent missing numeric data, NOT text content.
-  # Without this, columns like Sheet 18 "Workers involved" (683 [x] + 457 numbers = 40%
-  # numeric) fail the coercion threshold and stay as text, causing #DIV/0! everywhere.
   ons_markers <- c("[x]", "[c]", "[z]", "..", "-", "~", ":", "[e]", "**",
                     "[x] ", " [x]", "[c] ", " [c]")
+
+  # Store original text BEFORE coercion so headers/notes/codes can be restored later.
+  # Without this, text like "All aged 16 & over", "level", "MGSL" in numeric columns
+  # gets silently destroyed when the column is coerced to numeric.
+  raw_text <- lapply(seq_len(ncol(tbl)), function(ci) as.character(tbl[[ci]]))
 
   for (ci in seq_len(ncol(tbl))) {
     vals <- tbl[[ci]]
@@ -44,14 +47,14 @@ if (!exists("parse_manual_month", inherits = TRUE)) {
     is_marker  <- trimmed %in% ons_markers
     is_numeric <- !is.na(num_vals) & !is_empty
 
-    # Among non-empty values, count those that are numeric data (numbers + markers)
     n_non_empty <- sum(!is_empty)
     n_data_vals <- sum(is_numeric | is_marker)
 
     if (n_non_empty > 0 && n_data_vals / n_non_empty > 0.5) {
-      tbl[[ci]] <- num_vals  # markers and header text both become NA, numbers stay
+      tbl[[ci]] <- num_vals
     }
   }
+  attr(tbl, "raw_text") <- raw_text
   tbl
 }
 
@@ -116,6 +119,22 @@ if (!exists("parse_manual_month", inherits = TRUE)) {
   list(cur = vals["cur"], dq = vals["cur"] - vals["q"],
        dy = vals["cur"] - vals["y"], dc = vals["cur"] - vals["covid"],
        de = vals["cur"] - vals["elec"])
+}
+
+# Restore text lost during numeric coercion (headers, notes, dataset IDs, ONS markers).
+# Call this after writeData() for any table produced by .safe_read().
+.restore_text <- function(wb, sheet_name, tbl, start_row) {
+  raw_text <- attr(tbl, "raw_text")
+  if (is.null(raw_text)) return(invisible(NULL))
+  for (ci in seq_len(ncol(tbl))) {
+    if (!is.numeric(tbl[[ci]])) next
+    orig <- raw_text[[ci]]
+    lost <- which(is.na(tbl[[ci]]) & !is.na(orig) & nchar(trimws(orig)) > 0)
+    if (length(lost) == 0) next
+    for (ri in lost) {
+      writeData(wb, sheet_name, orig[ri], startRow = start_row + ri - 1, startCol = ci)
+    }
+  }
 }
 
 # openxlsx style helpers
@@ -287,6 +306,7 @@ if (!exists("parse_manual_month", inherits = TRUE)) {
   # Numeric coercion already handled by .safe_read() (with ONS marker awareness)
 
   writeData(wb, sheet_name, tbl, colNames = FALSE, startRow = start_row)
+  .restore_text(wb, sheet_name, tbl, start_row)
 
   # Apply date format to date column
   if (!is.null(date_col) && date_col <= ncol(tbl)) {
@@ -394,8 +414,6 @@ create_audit_workbook <- function(
   }
 
   # --- A01 simple sheets (no comparison rows) ---
-  .ws(file_a01, "1", "Sheet1", "#2F5496", date_col = 1)
-  .ws(file_a01, "3", "3", "#2F5496", date_col = 1, title = "Economic activity by age")
   .ws(file_a01, "19", "19", "#2F5496", date_col = 1)
   .ws(file_a01, "22", "22", "#843C0C", date_col = 1, title = "Summary of regional labour market statistics")
 
@@ -587,6 +605,7 @@ create_audit_workbook <- function(
 
       # Write original data from row 5
       writeData(wb, sn, tbl_rtisa, colNames = FALSE, startRow = 5)
+      .restore_text(wb, sn, tbl_rtisa, 5)
       addStyle(wb, sn, .data_font(), rows = 5:(5 + nrow(tbl_rtisa)),
                cols = 1:ncol(tbl_rtisa), gridExpand = TRUE, stack = TRUE)
       setColWidths(wb, sn, cols = 1, widths = 18)
@@ -653,6 +672,7 @@ create_audit_workbook <- function(
 
       # Write original data from row 5
       writeData(wb, sn, tbl_23, colNames = FALSE, startRow = 5)
+      .restore_text(wb, sn, tbl_23, 5)
       addStyle(wb, sn, .data_font(), rows = 5:(5 + nrow(tbl_23)),
                cols = 1:ncol(tbl_23), gridExpand = TRUE, stack = TRUE)
 
@@ -778,6 +798,7 @@ create_audit_workbook <- function(
 
       # Write original data from row 11
       writeData(wb, sn, tbl_2_full, colNames = FALSE, startRow = 11)
+      .restore_text(wb, sn, tbl_2_full, 11)
       addStyle(wb, sn, .data_font(), rows = 11:(11 + nrow(tbl_2_full)),
                cols = 1:ncol(tbl_2_full), gridExpand = TRUE, stack = TRUE)
       setColWidths(wb, sn, cols = 1, widths = 16)
@@ -793,6 +814,7 @@ create_audit_workbook <- function(
 
       # Write original data from row 7 first (need it for formula references)
       writeData(wb, sn, tbl_5, colNames = FALSE, startRow = 7)
+      .restore_text(wb, sn, tbl_5, 7)
       addStyle(wb, sn, .data_font(), rows = 7:(7 + nrow(tbl_5)),
                cols = 1:ncol(tbl_5), gridExpand = TRUE, stack = TRUE)
       setColWidths(wb, sn, cols = 1, widths = 16)
@@ -898,6 +920,7 @@ create_audit_workbook <- function(
 
       # Original data from row 10
       writeData(wb, sn, tbl_10_full, colNames = FALSE, startRow = 10)
+      .restore_text(wb, sn, tbl_10_full, 10)
       addStyle(wb, sn, .data_font(), rows = 10:(10 + nrow(tbl_10_full)),
                cols = 1:ncol(tbl_10_full), gridExpand = TRUE, stack = TRUE)
       setColWidths(wb, sn, cols = 1, widths = 16)
@@ -949,6 +972,7 @@ create_audit_workbook <- function(
 
       # Write source data at row 9
       writeData(wb, sn, tbl_11, colNames = FALSE, startRow = 9)
+      .restore_text(wb, sn, tbl_11, 9)
 
       # Detect data start rows
       off_11 <- 8
@@ -1052,6 +1076,7 @@ create_audit_workbook <- function(
     # Write source data at row 9
     tbl_13[[1]] <- .detect_dates(tbl_13[[1]])
     writeData(wb, sn, tbl_13, colNames = FALSE, startRow = 9)
+    .restore_text(wb, sn, tbl_13, 9)
 
     # Detect data start rows for each column type
     off_13 <- 8  # startRow(9) - 1
@@ -1184,6 +1209,7 @@ create_audit_workbook <- function(
       # Write source data at row 9
       tbl_15_full[[1]] <- .detect_dates(tbl_15_full[[1]])
       writeData(wb, sn, tbl_15_full, colNames = FALSE, startRow = 9)
+      .restore_text(wb, sn, tbl_15_full, 9)
 
       # Detect data start rows
       off_15 <- 8
@@ -1289,6 +1315,7 @@ create_audit_workbook <- function(
 
       # Write source data at row 10
       writeData(wb, sn, tbl_18, colNames = FALSE, startRow = 10)
+      .restore_text(wb, sn, tbl_18, 10)
 
       # Detect data start row (first numeric value in col 2)
       off_18 <- 9
@@ -1401,6 +1428,7 @@ create_audit_workbook <- function(
 
       # Write source data at row 9
       writeData(wb, sn, tbl_20, colNames = FALSE, startRow = 9)
+      .restore_text(wb, sn, tbl_20, 9)
 
       # Detect data start row (source data col C = output col 3)
       off_20 <- 8
@@ -1531,6 +1559,7 @@ create_audit_workbook <- function(
 
       # Write source data at row 9
       writeData(wb, sn, tbl_21, colNames = FALSE, startRow = 9)
+      .restore_text(wb, sn, tbl_21, 9)
 
       # Detect data start row (first numeric in col 3)
       off_21 <- 8
@@ -1630,6 +1659,7 @@ create_audit_workbook <- function(
     if (inherits(tbl_cpi[[1]], c("POSIXct", "POSIXt"))) tbl_cpi[[1]] <- as.Date(tbl_cpi[[1]])
     if (is.numeric(tbl_cpi[[1]])) tbl_cpi[[1]] <- as.Date(tbl_cpi[[1]], origin = "1899-12-30")
     writeData(wb, sn, tbl_cpi, colNames = FALSE, startRow = 9)
+    .restore_text(wb, sn, tbl_cpi, 9)
 
     # Detect data start rows
     off_cpi <- 8
@@ -1728,10 +1758,12 @@ create_audit_workbook <- function(
       sn <- "1a"
       max_ci_1a <- min(ncol(tbl_1a), 13)
 
-      # Row 1: Region headers from source data
+      # Row 1: Region headers from source data (row 4 in source = column headers)
+      # Use raw_text to get original header text (may be NA in coerced numeric cols)
+      raw_1a <- attr(tbl_1a, "raw_text")
       for (ci in 2:max_ci_1a) {
-        hdr <- as.character(tbl_1a[[ci]][1])
-        if (!is.na(hdr) && nchar(hdr) > 0) {
+        hdr <- if (!is.null(raw_1a)) raw_1a[[ci]][4] else as.character(tbl_1a[[ci]][4])
+        if (!is.na(hdr) && nchar(trimws(hdr)) > 0) {
           writeData(wb, sn, hdr, startRow = 1, startCol = ci)
           addStyle(wb, sn, .hs(), rows = 1, cols = ci, stack = TRUE)
         }
@@ -1748,6 +1780,7 @@ create_audit_workbook <- function(
 
       # Write source data at row 9
       writeData(wb, sn, tbl_1a, colNames = FALSE, startRow = 9)
+      .restore_text(wb, sn, tbl_1a, 9)
 
       # Detect data start row
       off_1a <- 8
@@ -2027,8 +2060,8 @@ create_audit_workbook <- function(
   # --- Data links ---
   addWorksheet(wb, "Data links", tabColour = "#FFC000")
   writeData(wb, "Data links", data.frame(
-    Sheet = c("1. Payrolled employees (UK)", "23. Employees Industry", "2", "3", "5",
-              "10", "11", "13", "15", "18", "20", "21", "22",
+    Sheet = c("1. Payrolled employees (UK)", "23. Employees Industry", "2", "5",
+              "10", "11", "13", "15", "18", "19", "20", "21", "22",
               "1 UK", "AWE Real_CPI", "1a/1b/2a/2b",
               "LFS Labour market flows SA", "RTI. Employee flows (UK)",
               "Unemployment/Employment/Inactivity", "Regional breakdowns"),
@@ -2086,172 +2119,11 @@ create_audit_workbook <- function(
   }
   setColWidths(wb, "Dashboard", cols = 1:6, widths = c(35, 15, 20, 18, 22, 22))
 
-  # ==========================================================================
-  # STEP 4b: Generate chart sheets (ggplot2 images)
-  # ==========================================================================
-
-  if (requireNamespace("ggplot2", quietly = TRUE)) {
-    library(ggplot2)
-
-    .govuk_theme <- function() {
-      theme_minimal(base_family = "sans", base_size = 11) +
-        theme(
-          plot.title = element_text(face = "bold", size = 14, colour = "#1F4E79"),
-          plot.subtitle = element_text(size = 10, colour = "#505050"),
-          panel.grid.minor = element_blank(),
-          legend.position = "bottom",
-          axis.title = element_text(size = 10),
-          plot.margin = margin(10, 15, 10, 10)
-        )
-    }
-
-    .insert_chart <- function(wb, sheet_name, plot_obj, title, tab_col = "#8DB4E2",
-                               width = 22, height = 13) {
-      addWorksheet(wb, sheet_name, tabColour = tab_col)
-      writeData(wb, sheet_name, title, startRow = 1, startCol = 1)
-      addStyle(wb, sheet_name, .ts(), rows = 1, cols = 1)
-      tmp_png <- tempfile(fileext = ".png")
-      tryCatch({
-        ggsave(tmp_png, plot = plot_obj, width = width, height = height, units = "cm", dpi = 200, bg = "white")
-        insertImage(wb, sheet_name, tmp_png, startRow = 3, startCol = 1,
-                    width = width, height = height, units = "cm")
-      }, error = function(e) {
-        writeData(wb, sheet_name, paste("Chart generation failed:", e$message),
-                  startRow = 3, startCol = 1)
-      })
-      tryCatch(file.remove(tmp_png), error = function(e) NULL)
-    }
-
-    # --- Wages charts ---
-    if (exists("tbl_cpi") && nrow(tbl_cpi) > 0) {
-      cpi_d <- .detect_dates(tbl_cpi[[1]])
-      cpi_tp <- suppressWarnings(as.numeric(as.character(tbl_cpi[[2]])))
-      cpi_rp <- if (ncol(tbl_cpi) >= 6) suppressWarnings(as.numeric(as.character(tbl_cpi[[6]]))) else rep(NA, nrow(tbl_cpi))
-      wage_df <- data.frame(
-        Date = rep(cpi_d, 2),
-        Value = c(cpi_tp, cpi_rp),
-        Series = rep(c("Total Pay", "Regular Pay"), each = length(cpi_d)),
-        stringsAsFactors = FALSE
-      )
-      wage_df <- wage_df[!is.na(wage_df$Date) & !is.na(wage_df$Value), ]
-      if (nrow(wage_df) > 0) {
-        p_wages <- ggplot(wage_df, aes(x = Date, y = Value, colour = Series)) +
-          geom_line(linewidth = 0.8) +
-          scale_colour_manual(values = c("Total Pay" = "#1F4E79", "Regular Pay" = "#C00000")) +
-          labs(title = "Real Average Weekly Earnings",
-               subtitle = "Constant 2015 prices, seasonally adjusted (\u00a3)",
-               x = NULL, y = "Weekly earnings (\u00a3)", colour = NULL) +
-          .govuk_theme()
-        .insert_chart(wb, "Wages charts", p_wages, "Real Average Weekly Earnings", "#BF8F00")
-      }
-    }
-
-    # --- Emp, Unemp & Inac Chart ---
-    if (exists("tbl_2_full") && nrow(tbl_2_full) > 0 && ncol(tbl_2_full) >= 9) {
-      # Extract rates from tbl_2_full: col1=labels, col3=emp rate, col5=unemp rate, col9=inact rate
-      s2_labels <- trimws(as.character(tbl_2_full[[1]]))
-      lfs_pat <- "^(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)-(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\\s+(\\d{4})$"
-      s2_lfs <- grep(lfs_pat, s2_labels)
-      if (length(s2_lfs) > 10) {
-        # Parse end dates from LFS labels
-        s2_dates <- vapply(s2_lfs, function(idx) {
-          parts <- regmatches(s2_labels[idx], regexec(lfs_pat, s2_labels[idx]))[[1]]
-          end_mon <- match(tools::toTitleCase(tolower(parts[3])), month.abb)
-          end_yr <- as.integer(parts[4])
-          if (!is.na(end_mon) && !is.na(end_yr)) as.Date(sprintf("%04d-%02d-01", end_yr, end_mon))
-          else NA_real_
-        }, numeric(1))
-        s2_dates <- as.Date(s2_dates, origin = "1970-01-01")
-
-        emp_rate <- suppressWarnings(as.numeric(as.character(tbl_2_full[[3]][s2_lfs])))
-        unemp_rate <- suppressWarnings(as.numeric(as.character(tbl_2_full[[5]][s2_lfs])))
-        inact_rate <- suppressWarnings(as.numeric(as.character(tbl_2_full[[9]][s2_lfs])))
-
-        eui_df <- data.frame(
-          Date = rep(s2_dates, 3),
-          Rate = c(emp_rate, unemp_rate, inact_rate),
-          Indicator = rep(c("Employment rate (%)", "Unemployment rate (%)", "Inactivity rate (%)"), each = length(s2_dates)),
-          stringsAsFactors = FALSE
-        )
-        eui_df <- eui_df[!is.na(eui_df$Date) & !is.na(eui_df$Rate), ]
-        # Only show last 20 years
-        eui_df <- eui_df[eui_df$Date >= as.Date("2005-01-01"), ]
-        if (nrow(eui_df) > 0) {
-          p_eui <- ggplot(eui_df, aes(x = Date, y = Rate, colour = Indicator)) +
-            geom_line(linewidth = 0.7) +
-            scale_colour_manual(values = c("Employment rate (%)" = "#1F4E79",
-                                           "Unemployment rate (%)" = "#C00000",
-                                           "Inactivity rate (%)" = "#548235")) +
-            labs(title = "Employment, Unemployment & Inactivity Rates",
-                 subtitle = "16-64 age group, seasonally adjusted",
-                 x = NULL, y = "Rate (%)", colour = NULL) +
-            .govuk_theme()
-          .insert_chart(wb, "Emp, Unemp & Inac Chart", p_eui, "Employment, Unemployment & Inactivity Rates", "#2F5496")
-        }
-      }
-    }
-
-    # --- Payrolled Employees Chart ---
-    if (exists("pay_df") && nrow(pay_df) > 0) {
-      pay_chart_df <- pay_df[pay_df$m >= as.Date("2014-01-01"), ]
-      if (nrow(pay_chart_df) > 0) {
-        p_pay <- ggplot(pay_chart_df, aes(x = m, y = v / 1000)) +
-          geom_line(colour = "#1F4E79", linewidth = 0.8) +
-          labs(title = "Payrolled Employees",
-               subtitle = "UK, seasonally adjusted (thousands)",
-               x = NULL, y = "Employees (thousands)") +
-          .govuk_theme()
-        .insert_chart(wb, "Payrolled Employees Chart", p_pay, "Payrolled Employees", "#548235")
-      }
-    }
-
-    # --- Vacancy and redundancy charts ---
-    vac_chart_made <- FALSE
-    if (exists("tbl_20") && nrow(tbl_20) > 0 && ncol(tbl_20) >= 3) {
-      # col1 = LFS labels, col2 = vacancies, col3 = unemployment
-      v20_labels <- trimws(as.character(tbl_20[[1]]))
-      v20_lfs <- grep(lfs_pat, v20_labels)
-      if (length(v20_lfs) > 10) {
-        v20_dates <- vapply(v20_lfs, function(idx) {
-          parts <- regmatches(v20_labels[idx], regexec(lfs_pat, v20_labels[idx]))[[1]]
-          end_mon <- match(tools::toTitleCase(tolower(parts[3])), month.abb)
-          end_yr <- as.integer(parts[4])
-          if (!is.na(end_mon) && !is.na(end_yr)) as.Date(sprintf("%04d-%02d-01", end_yr, end_mon))
-          else NA_real_
-        }, numeric(1))
-        v20_dates <- as.Date(v20_dates, origin = "1970-01-01")
-        vac_vals <- suppressWarnings(as.numeric(as.character(tbl_20[[2]][v20_lfs])))
-        vac_chart_df <- data.frame(Date = v20_dates, Vacancies = vac_vals, stringsAsFactors = FALSE)
-        vac_chart_df <- vac_chart_df[!is.na(vac_chart_df$Date) & !is.na(vac_chart_df$Vacancies), ]
-        vac_chart_df <- vac_chart_df[vac_chart_df$Date >= as.Date("2005-01-01"), ]
-        if (nrow(vac_chart_df) > 0) {
-          p_vac <- ggplot(vac_chart_df, aes(x = Date, y = Vacancies)) +
-            geom_line(colour = "#1F4E79", linewidth = 0.8) +
-            labs(title = "Vacancies (thousands)",
-                 subtitle = "UK, seasonally adjusted, rolling 3-month average",
-                 x = NULL, y = "Vacancies (000s)") +
-            .govuk_theme()
-          .insert_chart(wb, "Vacancy and redundancy charts", p_vac,
-                        "Vacancies & Redundancies", "#2F5496")
-          vac_chart_made <- TRUE
-        }
-      }
-    }
-
-  } else {
-    # ggplot2 not available — create placeholder chart sheets
-    for (ch_name in c("Wages charts", "Emp, Unemp & Inac Chart",
-                       "Payrolled Employees Chart", "Vacancy and redundancy charts")) {
-      if (!ch_name %in% names(wb)) {
-        addWorksheet(wb, ch_name, tabColour = "#8DB4E2")
-        writeData(wb, ch_name, data.frame(Note = "Install ggplot2 package to generate charts automatically."))
-      }
-    }
-  }
+  # (Charts removed per user request)
 
   # --- Separator sheets ---
   for (sep_name in c("Redundancies >>>", "Labour market flows >>>",
-                      "International Comparisons >>>", "Charts >>>")) {
+                      "International Comparisons >>>")) {
     if (!sep_name %in% names(wb)) {
       addWorksheet(wb, sep_name, tabColour = "#8DB4E2")
       writeData(wb, sep_name, data.frame(X = sep_name), startRow = 1, colNames = FALSE)
@@ -2313,15 +2185,12 @@ create_audit_workbook <- function(
   desired_order <- c(
     "How to update", "Data links", "Dashboard",
     "1. Payrolled employees (UK)", "23. Employees Industry",
-    "2", "Sheet1", "3", "5", "10", "11", "13", "15", "18", "21", "20", "22",
+    "2", "5", "10", "11", "13", "15", "18", "19", "21", "20", "22",
     "1 UK", "AWE Real_CPI",
     "Redundancies >>>", "1a", "1b", "2a", "2b",
     "Labour market flows >>>", "LFS Labour market flows SA", "RTI. Employee flows (UK)",
     "International Comparisons >>>", "Final Table", "Unemployment", "Employment", "Inactivity",
-    "Charts >>>",
-    "Wages charts", "Emp, Unemp & Inac Chart", "Payrolled Employees Chart",
     "Employee levels - LFS,RTI,WFJ",
-    "Vacancy and redundancy charts",
     "International Comparisons", "Regional breakdowns"
   )
 
