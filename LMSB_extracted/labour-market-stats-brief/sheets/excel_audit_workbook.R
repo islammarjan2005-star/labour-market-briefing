@@ -75,6 +75,12 @@ if (!exists("parse_manual_month", inherits = TRUE)) {
   mean(vals)
 }
 
+.first_num_r <- function(tbl, col) {
+  vals <- suppressWarnings(as.numeric(as.character(tbl[[col]])))
+  idx <- which(!is.na(vals))
+  if (length(idx) == 0) NA_integer_ else idx[1]
+}
+
 .lfs_metric <- function(tbl, col, labels) {
   rows <- vapply(labels, function(l) .find_row(tbl, l), integer(1))
   vals <- vapply(seq_along(rows), function(i) .cell_num(tbl, rows[i], col), numeric(1))
@@ -1015,11 +1021,6 @@ create_audit_workbook <- function(
     writeData(wb, sn, tbl_13, colNames = FALSE, startRow = 9)
 
     # Detect data start rows for each column type
-    .first_num_r <- function(tbl, col) {
-      vals <- suppressWarnings(as.numeric(as.character(tbl[[col]])))
-      idx <- which(!is.na(vals))
-      if (length(idx) == 0) NA_integer_ else idx[1]
-    }
     off_13 <- 8  # startRow(9) - 1
     dsr_w <- .first_num_r(tbl_13, 2) + off_13  # weekly £ data start row
     dsr_s <- .first_num_r(tbl_13, 3) + off_13  # single month % data start row
