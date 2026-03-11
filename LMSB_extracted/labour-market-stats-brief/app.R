@@ -1774,6 +1774,9 @@ server <- function(input, output, session) {
               manual_month = manual_month,
               file_a01 = uploaded_files$a01, file_hr1 = uploaded_files$hr1,
               file_x09 = uploaded_files$x09, file_rtisa = uploaded_files$rtisa,
+              file_oecd_unemp = uploaded_files$oecd_unemp,
+              file_oecd_emp   = uploaded_files$oecd_emp,
+              file_oecd_inact = uploaded_files$oecd_inact,
               template_path = manual_template,
               output_path = file,
               verbose = FALSE
