@@ -443,14 +443,34 @@ create_audit_workbook <- function(
     if (!is.null(oecd_info$file)) {
       ext <- tolower(tools::file_ext(oecd_info$file))
       if (ext == "csv") {
+        # OECD CSV downloads are in SDMX long format — pivot to wide (countries x time)
         csv_data <- tryCatch(read.csv(oecd_info$file, stringsAsFactors = FALSE),
                              error = function(e) data.frame())
         if (nrow(csv_data) > 0) {
+          # Detect SDMX columns and pivot if possible
+          has_ref   <- any(c("REF_AREA", "Reference.area") %in% names(csv_data))
+          has_time  <- any(c("TIME_PERIOD", "Time.period") %in% names(csv_data))
+          has_value <- any(c("OBS_VALUE", "Observation.value") %in% names(csv_data))
+          if (has_ref && has_time && has_value) {
+            ref_col  <- intersect(c("Reference.area", "REF_AREA"), names(csv_data))[1]
+            time_col <- intersect(c("Time.period", "TIME_PERIOD"), names(csv_data))[1]
+            val_col  <- intersect(c("OBS_VALUE", "Observation.value"), names(csv_data))[1]
+            # Pivot: rows = country, cols = time period, values = obs value
+            countries <- unique(csv_data[[ref_col]])
+            periods   <- sort(unique(csv_data[[time_col]]))
+            wide_df <- data.frame(Country = countries, stringsAsFactors = FALSE)
+            for (tp in periods) {
+              tp_data <- csv_data[csv_data[[time_col]] == tp, ]
+              wide_df[[tp]] <- tp_data[[val_col]][match(wide_df$Country, tp_data[[ref_col]])]
+            }
+            csv_data <- wide_df
+          }
           addWorksheet(wb, oecd_info$name, tabColour = "#2F5496")
           writeData(wb, oecd_info$name, csv_data, headerStyle = .hs())
         }
       } else {
-        oecd_sh <- .detect_sheet(oecd_info$file, c(oecd_info$name, "Sheet1", "Data"))
+        # OECD Excel downloads have a "Table" sheet with the pre-formatted wide view
+        oecd_sh <- .detect_sheet(oecd_info$file, c("Table", oecd_info$name, "Sheet1", "Data"))
         if (!is.null(oecd_sh)) .ws(oecd_info$file, oecd_sh, oecd_info$name, "#2F5496")
       }
     }
