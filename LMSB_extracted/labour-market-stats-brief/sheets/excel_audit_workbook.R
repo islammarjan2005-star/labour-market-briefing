@@ -21,10 +21,26 @@ if (!exists("parse_manual_month", inherits = TRUE)) {
 
 .safe_read <- function(path, sheet, ...) {
   if (is.null(path)) return(data.frame())
-  tryCatch(
+  tbl <- tryCatch(
     suppressMessages(read_excel(path, sheet = sheet, col_names = FALSE, ...)),
     error = function(e) data.frame()
   )
+  if (nrow(tbl) == 0) return(tbl)
+  # Coerce character columns to numeric where majority of non-empty values are numeric.
+  # This prevents numbers being stored as text in Excel, which causes #DIV/0! errors
+  # because AVERAGE() and other functions ignore text cells.
+  for (ci in seq_len(ncol(tbl))) {
+    vals <- tbl[[ci]]
+    if (is.character(vals)) {
+      num_vals <- suppressWarnings(as.numeric(vals))
+      n_non_na <- sum(!is.na(vals) & nchar(trimws(vals)) > 0)
+      n_numeric <- sum(!is.na(num_vals) & !is.na(vals) & nchar(trimws(vals)) > 0)
+      if (n_non_na > 0 && n_numeric / n_non_na > 0.5) {
+        tbl[[ci]] <- num_vals
+      }
+    }
+  }
+  tbl
 }
 
 .detect_dates <- function(x) {
@@ -381,13 +397,16 @@ create_audit_workbook <- function(
   .ws(file_a01, "1", "Sheet1", "#2F5496", date_col = 1)
   .ws(file_a01, "3", "3", "#2F5496", date_col = 1, title = "Economic activity by age")
   .ws(file_a01, "19", "19", "#2F5496", date_col = 1)
-  .ws(file_a01, "22", "22", "#843C0C", date_col = 1, title = "Young people not in education, employment or training (NEET)")
+  .ws(file_a01, "22", "22", "#843C0C", date_col = 1, title = "Summary of regional labour market statistics")
 
   # --- RTISA simple sheets ---
   .ws(file_rtisa, "6. Employee flows (UK)", "RTI. Employee flows (UK)", "#548235", date_col = 1)
 
   # --- HR1 sheets (1b, 2a, 2b are simple; 1a gets comparison rows in Step 3) ---
-  for (s in c("1b", "2a", "2b")) .ws(file_hr1, s, s, "#C00000", date_col = 1)
+  hr1_titles <- list("1b" = "HR1 - Redundancy notifications by region",
+                     "2a" = "HR1 - Redundancy notifications by industry",
+                     "2b" = "HR1 - Redundancy notifications by industry (cont.)")
+  for (s in c("1b", "2a", "2b")) .ws(file_hr1, s, s, "#C00000", date_col = 1, title = hr1_titles[[s]])
 
   # --- CLA01 ---
   cla_sheet <- .detect_sheet(file_cla01, c("1", "People SA", "People", "People_SA", "Sheet1", "CLA01"))
@@ -692,30 +711,33 @@ create_audit_workbook <- function(
       sn <- "2"
       addWorksheet(wb, sn, tabColour = "#2F5496")
 
-      # Extended column count: up to col 24 (16-17 age group) or whatever source has
-      s2_ncol <- min(ncol(tbl_2_full), 24)
+      # Use all available source columns (covers all age groups)
+      s2_ncol <- ncol(tbl_2_full)
 
-      # Section headers (row 2 — row 1 left blank per reference)
-      writeData(wb, sn, "Aged 16 and over", startRow = 2, startCol = 2)
-      writeData(wb, sn, "Aged 16-64 ", startRow = 2, startCol = 10)
-      addStyle(wb, sn, .hs(), rows = 2, cols = c(2, 10), stack = TRUE)
-      if (s2_ncol >= 18) {
-        writeData(wb, sn, "Aged 16-17", startRow = 2, startCol = 18)
-        addStyle(wb, sn, .hs(), rows = 2, cols = 18, stack = TRUE)
+      # Age group headers (row 2) — 8 columns per group (4 measures x level/rate)
+      age_groups_2 <- list(
+        list(sc = 2,  name = "Aged 16 and over"),
+        list(sc = 10, name = "Aged 16-64"),
+        list(sc = 18, name = "Aged 16-17"),
+        list(sc = 26, name = "Aged 18-24"),
+        list(sc = 34, name = "Aged 25-34"),
+        list(sc = 42, name = "Aged 35-49"),
+        list(sc = 50, name = "Aged 50-64")
+      )
+      for (ag in age_groups_2) {
+        if (ag$sc <= s2_ncol) {
+          writeData(wb, sn, ag$name, startRow = 2, startCol = ag$sc)
+        }
       }
 
-      # Category headers (row 3)
-      cats_16plus <- list(c(2, "Employment"), c(4, "Unemployment"), c(6, "Activity"), c(8, "Inactivity"))
-      cats_1664   <- list(c(10, "Employment"), c(12, "Unemployment"), c(14, "Activity"))
-      cats_1617   <- list(c(18, "Employment"), c(20, "Unemployment"), c(22, "Activity"), c(24, "Inactivity"))
-      if (s2_ncol >= 16) {
-        cats_1664 <- c(cats_1664, list(c(16, "Inactivity")))
-      }
-      for (ci_pair in c(cats_16plus, cats_1664, if (s2_ncol >= 18) cats_1617 else list())) {
-        cc <- as.integer(ci_pair[1])
-        if (cc <= s2_ncol) {
-          writeData(wb, sn, ci_pair[2], startRow = 3, startCol = cc)
-          addStyle(wb, sn, .hs(), rows = 3, cols = cc, stack = TRUE)
+      # Category headers (row 3) — Employment, Unemployment, Activity, Inactivity per group
+      categories_2 <- c("Employment", "Unemployment", "Activity", "Inactivity")
+      for (ag in age_groups_2) {
+        for (j in seq_along(categories_2)) {
+          cc <- ag$sc + (j - 1) * 2
+          if (cc <= s2_ncol) {
+            writeData(wb, sn, categories_2[j], startRow = 3, startCol = cc)
+          }
         }
       }
 
@@ -724,7 +746,7 @@ create_audit_workbook <- function(
         writeData(wb, sn, "level", startRow = 4, startCol = ci)
         if (ci + 1 <= s2_ncol) writeData(wb, sn, "rate (%)", startRow = 4, startCol = ci + 1)
       }
-      addStyle(wb, sn, .hs(), rows = 3:4, cols = 2:s2_ncol, gridExpand = TRUE, stack = TRUE)
+      addStyle(wb, sn, .hs(), rows = 2:4, cols = 2:s2_ncol, gridExpand = TRUE, stack = TRUE)
 
       # Comparison data rows 5-10
       cmp_labels <- c("Current", "Quarterly change", "Change year on year",
@@ -834,23 +856,27 @@ create_audit_workbook <- function(
       sn <- "10"
       addWorksheet(wb, sn, tabColour = "#2F5496")
 
-      # Headers
+      # Title
+      writeData(wb, sn, "Redundancies", startRow = 1, startCol = 1)
+      addStyle(wb, sn, .ts(), rows = 1, cols = 1)
+
+      # Headers (shifted down by 1 for title)
       for (pair in list(c(2, "People"), c(4, "Men"), c(6, "Women"))) {
-        writeData(wb, sn, pair[2], startRow = 1, startCol = as.integer(pair[1]))
-        addStyle(wb, sn, .hs(), rows = 1, cols = as.integer(pair[1]), stack = TRUE)
+        writeData(wb, sn, pair[2], startRow = 2, startCol = as.integer(pair[1]))
+        addStyle(wb, sn, .hs(), rows = 2, cols = as.integer(pair[1]), stack = TRUE)
       }
       for (ci in c(2, 4, 6)) {
-        writeData(wb, sn, "Level", startRow = 2, startCol = ci)
-        writeData(wb, sn, "Rate per thousand", startRow = 2, startCol = ci + 1)
+        writeData(wb, sn, "Level", startRow = 3, startCol = ci)
+        writeData(wb, sn, "Rate per thousand", startRow = 3, startCol = ci + 1)
       }
-      addStyle(wb, sn, .hs(), rows = 2, cols = 2:7, gridExpand = TRUE, stack = TRUE)
+      addStyle(wb, sn, .hs(), rows = 3, cols = 2:7, gridExpand = TRUE, stack = TRUE)
 
       # Comparison rows — compute from source data for all 6 columns
       cmp_labels_10 <- c("Current", "Quarterly change", "year on year change",
                           "Since pandemic", "Since 2010 election")
       all_labels_10 <- c(lab_cur, lab_q, lab_y, "Dec-Feb 2020", "Feb-Apr 2010")
       for (i in seq_along(cmp_labels_10)) {
-        r <- 2 + i
+        r <- 3 + i
         writeData(wb, sn, cmp_labels_10[i], startRow = r, startCol = 1)
         addStyle(wb, sn, .cmp_label(), rows = r, cols = 1, stack = TRUE)
         for (ci in 2:min(ncol(tbl_10_full), 7)) {
@@ -866,13 +892,13 @@ create_audit_workbook <- function(
           }
         }
       }
-      addStyle(wb, sn, .num_fmt(), rows = 3:7, cols = c(2, 4, 6), gridExpand = TRUE, stack = TRUE)
-      addStyle(wb, sn, .pp_fmt(), rows = 3:7, cols = c(3, 5, 7), gridExpand = TRUE, stack = TRUE)
-      addStyle(wb, sn, .cmp_sep(), rows = 7, cols = 1:7, gridExpand = TRUE, stack = TRUE)
+      addStyle(wb, sn, .num_fmt(), rows = 4:8, cols = c(2, 4, 6), gridExpand = TRUE, stack = TRUE)
+      addStyle(wb, sn, .pp_fmt(), rows = 4:8, cols = c(3, 5, 7), gridExpand = TRUE, stack = TRUE)
+      addStyle(wb, sn, .cmp_sep(), rows = 8, cols = 1:7, gridExpand = TRUE, stack = TRUE)
 
-      # Original data from row 9
-      writeData(wb, sn, tbl_10_full, colNames = FALSE, startRow = 9)
-      addStyle(wb, sn, .data_font(), rows = 9:(9 + nrow(tbl_10_full)),
+      # Original data from row 10
+      writeData(wb, sn, tbl_10_full, colNames = FALSE, startRow = 10)
+      addStyle(wb, sn, .data_font(), rows = 10:(10 + nrow(tbl_10_full)),
                cols = 1:ncol(tbl_10_full), gridExpand = TRUE, stack = TRUE)
       setColWidths(wb, sn, cols = 1, widths = 16)
     }
@@ -1238,30 +1264,34 @@ create_audit_workbook <- function(
       sn <- "18"
       addWorksheet(wb, sn, tabColour = "#2F5496")
 
-      # Headers matching reference
+      # Title
+      writeData(wb, sn, "Labour Disputes summary", startRow = 1, startCol = 1)
+      addStyle(wb, sn, .ts(), rows = 1, cols = 1)
+
+      # Headers matching reference (shifted to row 2 for title)
       col_hdrs_18 <- c("Working days lost (thousands) ",
                         "Number of stoppages 1,2",
                         "Workers involved (thousands) 3")
       for (ci in seq_along(col_hdrs_18)) {
-        writeData(wb, sn, col_hdrs_18[ci], startRow = 1, startCol = ci + 1)
-        addStyle(wb, sn, .hs(), rows = 1, cols = ci + 1, stack = TRUE)
+        writeData(wb, sn, col_hdrs_18[ci], startRow = 2, startCol = ci + 1)
+        addStyle(wb, sn, .hs(), rows = 2, cols = ci + 1, stack = TRUE)
       }
 
-      # Comparison row labels (rows 2-7)
+      # Comparison row labels (rows 3-8)
       cmp_labels_18 <- c("Current  (singular month)", "Change on quarter  (3mo avg)",
                           "Change since Covid-19 (2019 average)",
                           "Change since 2024 election (3mo avg)",
                           "2019 average", "2023 average")
       for (i in seq_along(cmp_labels_18)) {
-        writeData(wb, sn, cmp_labels_18[i], startRow = i + 1, startCol = 1)
-        addStyle(wb, sn, .cmp_label(), rows = i + 1, cols = 1, stack = TRUE)
+        writeData(wb, sn, cmp_labels_18[i], startRow = i + 2, startCol = 1)
+        addStyle(wb, sn, .cmp_label(), rows = i + 2, cols = 1, stack = TRUE)
       }
 
-      # Write source data at row 9
-      writeData(wb, sn, tbl_18, colNames = FALSE, startRow = 9)
+      # Write source data at row 10
+      writeData(wb, sn, tbl_18, colNames = FALSE, startRow = 10)
 
       # Detect data start row (first numeric value in col 2)
-      off_18 <- 8
+      off_18 <- 9
       dsr_18 <- .first_num_r(tbl_18, 2) + off_18
 
       # Find baseline rows dynamically from dates
@@ -1282,52 +1312,52 @@ create_audit_workbook <- function(
         cl <- .col_letter(ci)
         is_days <- (ci == 2)  # col B (working days lost) uses *52 multiplier
 
-        # Row 2: Current (singular month) — last value
-        .wf(wb, sn, .fml_last(cl, dsr_18), 2, ci)
+        # Row 3: Current (singular month) — last value
+        .wf(wb, sn, .fml_last(cl, dsr_18), 3, ci)
 
-        # Row 3: Change on quarter (3mo avg) — col B *52, others plain
+        # Row 4: Change on quarter (3mo avg) — col B *52, others plain
         if (is_days) {
-          .wf(wb, sn, sprintf("(%s)*52", .fml_change_avg(cl, dsr_18, -5)), 3, ci)
+          .wf(wb, sn, sprintf("(%s)*52", .fml_change_avg(cl, dsr_18, -5)), 4, ci)
         } else {
-          .wf(wb, sn, .fml_change_avg(cl, dsr_18, -5), 3, ci)
+          .wf(wb, sn, .fml_change_avg(cl, dsr_18, -5), 4, ci)
         }
 
-        # Row 4: Change since Covid-19 (2019 average)
+        # Row 5: Change since Covid-19 (2019 average)
         if (!is.na(r2019_start) && !is.na(r2019_end)) {
           if (is_days) {
             .wf(wb, sn, sprintf("(%s-AVERAGE(%s$%d:%s$%d))*52",
-                                 .fml_avg_last(cl, dsr_18), cl, r2019_start, cl, r2019_end), 4, ci)
+                                 .fml_avg_last(cl, dsr_18), cl, r2019_start, cl, r2019_end), 5, ci)
           } else {
             .wf(wb, sn, sprintf("%s-AVERAGE(%s$%d:%s$%d)",
-                                 .fml_avg_last(cl, dsr_18), cl, r2019_start, cl, r2019_end), 4, ci)
+                                 .fml_avg_last(cl, dsr_18), cl, r2019_start, cl, r2019_end), 5, ci)
           }
         }
 
-        # Row 5: Change since 2024 election (3mo avg)
+        # Row 6: Change since 2024 election (3mo avg)
         if (!is.na(elec18_r1) && !is.na(elec18_r3)) {
           if (is_days) {
             .wf(wb, sn, sprintf("(%s-AVERAGE(%s$%d:%s$%d))*52",
-                                 .fml_avg_last(cl, dsr_18), cl, elec18_r1, cl, elec18_r3), 5, ci)
+                                 .fml_avg_last(cl, dsr_18), cl, elec18_r1, cl, elec18_r3), 6, ci)
           } else {
             .wf(wb, sn, sprintf("%s-AVERAGE(%s$%d:%s$%d)",
-                                 .fml_avg_last(cl, dsr_18), cl, elec18_r1, cl, elec18_r3), 5, ci)
+                                 .fml_avg_last(cl, dsr_18), cl, elec18_r1, cl, elec18_r3), 6, ci)
           }
         }
 
-        # Row 6: 2019 average
+        # Row 7: 2019 average
         if (!is.na(r2019_start) && !is.na(r2019_end))
-          .wf(wb, sn, .fml_avg_range(cl, r2019_start, r2019_end), 6, ci)
+          .wf(wb, sn, .fml_avg_range(cl, r2019_start, r2019_end), 7, ci)
 
-        # Row 7: 2023 average
+        # Row 8: 2023 average
         if (!is.na(r2023_start) && !is.na(r2023_end))
-          .wf(wb, sn, .fml_avg_range(cl, r2023_start, r2023_end), 7, ci)
+          .wf(wb, sn, .fml_avg_range(cl, r2023_start, r2023_end), 8, ci)
       }
 
-      addStyle(wb, sn, .num_fmt(), rows = 2:7, cols = 2:4, gridExpand = TRUE, stack = TRUE)
-      addStyle(wb, sn, .cmp_sep(), rows = 7, cols = 1:4, gridExpand = TRUE, stack = TRUE)
+      addStyle(wb, sn, .num_fmt(), rows = 3:8, cols = 2:4, gridExpand = TRUE, stack = TRUE)
+      addStyle(wb, sn, .cmp_sep(), rows = 8, cols = 1:4, gridExpand = TRUE, stack = TRUE)
 
       # Source data styling
-      addStyle(wb, sn, .data_font(), rows = 9:(9 + nrow(tbl_18)),
+      addStyle(wb, sn, .data_font(), rows = 10:(10 + nrow(tbl_18)),
                cols = 1:ncol(tbl_18), gridExpand = TRUE, stack = TRUE)
       setColWidths(wb, sn, cols = 1, widths = 40)
       setColWidths(wb, sn, cols = 2:4, widths = 20)
