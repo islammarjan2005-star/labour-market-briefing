@@ -158,7 +158,7 @@ if (!exists("parse_manual_month", inherits = TRUE)) {
 .pct_fmt   <- function() createStyle(numFmt = "0.0%")
 .pp_fmt    <- function() createStyle(numFmt = "0.0")
 .pp2_fmt   <- function() createStyle(numFmt = "0.00")
-.gbp_fmt   <- function() createStyle(numFmt = "\"\\u00a3\"#,##0")
+.gbp_fmt   <- function() createStyle(numFmt = "\"\u00a3\"#,##0")
 .data_font <- function() createStyle(fontName = "Arial", fontSize = 10)
 
 # ============================================================================

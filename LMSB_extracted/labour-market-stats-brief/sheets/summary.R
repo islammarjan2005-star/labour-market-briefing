@@ -21,17 +21,17 @@ fmt_signed_int <- function(x) {
   paste0(s, format(round(abs(x), 0), big.mark = ","))
 }
 
-# round to nearest 1,000 (absolute)
+# format integer with commas (absolute)
 fmt_int_1k <- function(x) {
-  if (is.na(x)) return("—")
-  format(round(abs(x), -3), big.mark = ",")
+  if (is.na(x)) return("\u2014")
+  format(round(abs(x)), big.mark = ",")
 }
 
-# round to nearest 1,000 (signed)
+# format integer with commas (signed)
 fmt_signed_int_1k <- function(x) {
-  if (is.na(x)) return("—")
+  if (is.na(x)) return("\u2014")
   s <- if (x > 0) "+" else if (x < 0) "-" else ""
-  paste0(s, format(round(abs(x), -3), big.mark = ","))
+  paste0(s, format(round(abs(x)), big.mark = ","))
 }
 
 fmt_signed_pp <- function(x) {
