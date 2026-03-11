@@ -548,13 +548,33 @@ ui <- fluidPage(
                                 ),
 
                                 div(class = "govuk-form-group",
-                                    fileInput("upload_files", "Upload Excel files (.xlsx)",
+                                    fileInput("upload_files", "Upload core Excel files (.xlsx)",
                                               accept = ".xlsx", multiple = TRUE, width = "100%"),
                                     div(class = "govuk-hint",
                                         "Select up to 4 files at once. Files are auto-detected by name (e.g. a01, hr1, x09, rtisa).")
                                 ),
 
                                 uiOutput("upload_status"),
+
+                                tags$details(class = "govuk-details", style = "margin-top: 10px;",
+                                  tags$summary(class = "govuk-details__summary",
+                                    span(class = "govuk-details__summary-text", "Supplementary files (for full Excel audit workbook)")
+                                  ),
+                                  div(class = "govuk-details__text",
+                                    p(class = "govuk-body-s", "These files add extra sheets to the Excel audit workbook.
+                                      Name files with the prefix to help auto-detection (e.g. cla01_feb2026.xlsx, x02_feb2026.xlsx,
+                                      oecd_unemployment.csv, oecd_employment.csv, oecd_inactivity.csv)."),
+                                    tags$ul(class = "govuk-list govuk-body-s",
+                                      tags$li("CLA01 — Claimant Count (JSA / Universal Credit)"),
+                                      tags$li("X02 — Labour Force Survey flows"),
+                                      tags$li("OECD — Unemployment, Employment, Inactivity (3 separate files)")
+                                    ),
+                                    fileInput("upload_extra_files", "Upload supplementary files",
+                                              accept = c(".xlsx", ".csv"), multiple = TRUE, width = "100%"),
+                                    div(class = "govuk-hint govuk-body-s",
+                                        "OECD files can be .csv (from OECD Data Explorer) or .xlsx.")
+                                  )
+                                ),
 
                                 div(class = "input-row",
                                     div(class = "govuk-form-group",
@@ -628,7 +648,9 @@ server <- function(input, output, session) {
 
   has_any_upload <- function() {
     !is.null(uploaded_files$a01) || !is.null(uploaded_files$hr1) ||
-      !is.null(uploaded_files$x09) || !is.null(uploaded_files$rtisa)
+      !is.null(uploaded_files$x09) || !is.null(uploaded_files$rtisa) ||
+      !is.null(uploaded_files$cla01) || !is.null(uploaded_files$x02) ||
+      !is.null(uploaded_files$oecd_unemp)
   }
 
   # reactive values
@@ -640,7 +662,12 @@ server <- function(input, output, session) {
     a01 = NULL,
     hr1 = NULL,
     x09 = NULL,
-    rtisa = NULL
+    rtisa = NULL,
+    cla01 = NULL,
+    x02 = NULL,
+    oecd_unemp = NULL,
+    oecd_emp = NULL,
+    oecd_inact = NULL
   )
 
   # Validate Excel sheets on upload and warn if wrong file
@@ -664,12 +691,20 @@ server <- function(input, output, session) {
     if (grepl("hr1", nm)) return("hr1")
     if (grepl("x09", nm)) return("x09")
     if (grepl("rtisa", nm)) return("rtisa")
+    if (grepl("cla01", nm)) return("cla01")
+    if (grepl("x02", nm)) return("x02")
+    # OECD files — detect by keyword in filename
+    if (grepl("oecd.*unemp", nm)) return("oecd_unemp")
+    if (grepl("oecd.*emp", nm) && !grepl("unemp", nm)) return("oecd_emp")
+    if (grepl("oecd.*inact", nm)) return("oecd_inact")
     # fallback: match by sheet names
     sheets <- tryCatch(tolower(readxl::excel_sheets(path)), error = function(e) character(0))
     if (any(sheets %in% c("1", "10", "13", "15", "19"))) return("a01")
     if (any(sheets %in% c("1a"))) return("hr1")
     if (any(grepl("awe real_cpi", sheets))) return("x09")
     if (any(grepl("payrolled employees", sheets))) return("rtisa")
+    if (any(grepl("claimant", sheets)) || any(grepl("people sa", sheets))) return("cla01")
+    if (any(grepl("labour market flows", sheets))) return("x02")
     NULL
   }
 
@@ -712,6 +747,16 @@ server <- function(input, output, session) {
       } else if (ftype == "rtisa") {
         .validate_excel(files$datapath[i], c("1. Payrolled employees (UK)", "23. Employees (Industry)"), "RTISA")
         uploaded_files$rtisa <- files$datapath[i]
+      } else if (ftype == "cla01") {
+        uploaded_files$cla01 <- files$datapath[i]
+      } else if (ftype == "x02") {
+        uploaded_files$x02 <- files$datapath[i]
+      } else if (ftype == "oecd_unemp") {
+        uploaded_files$oecd_unemp <- files$datapath[i]
+      } else if (ftype == "oecd_emp") {
+        uploaded_files$oecd_emp <- files$datapath[i]
+      } else if (ftype == "oecd_inact") {
+        uploaded_files$oecd_inact <- files$datapath[i]
       }
 
       detected_types <- c(detected_types, toupper(ftype))
@@ -725,19 +770,76 @@ server <- function(input, output, session) {
     }
   })
 
+  # handle supplementary file uploads (CLA01, X02, OECD)
+  observeEvent(input$upload_extra_files, {
+    files <- input$upload_extra_files
+    if (is.null(files)) return()
+
+    detected_types <- character(0)
+
+    for (i in seq_len(nrow(files))) {
+      ftype <- .detect_file_type(files$name[i], files$datapath[i])
+      if (is.null(ftype)) {
+        showNotification(
+          paste0("Could not identify supplementary file: ", files$name[i],
+                 ". Expected CLA01, X02, or OECD files (name files with these prefixes)."),
+          type = "warning", duration = 8
+        )
+        next
+      }
+
+      # store recognised types
+      if (ftype == "cla01") {
+        uploaded_files$cla01 <- files$datapath[i]
+      } else if (ftype == "x02") {
+        uploaded_files$x02 <- files$datapath[i]
+      } else if (ftype == "oecd_unemp") {
+        uploaded_files$oecd_unemp <- files$datapath[i]
+      } else if (ftype == "oecd_emp") {
+        uploaded_files$oecd_emp <- files$datapath[i]
+      } else if (ftype == "oecd_inact") {
+        uploaded_files$oecd_inact <- files$datapath[i]
+      } else {
+        # core files can also be uploaded via supplementary uploader
+        if (ftype == "a01") uploaded_files$a01 <- files$datapath[i]
+        if (ftype == "hr1") uploaded_files$hr1 <- files$datapath[i]
+        if (ftype == "x09") uploaded_files$x09 <- files$datapath[i]
+        if (ftype == "rtisa") uploaded_files$rtisa <- files$datapath[i]
+      }
+
+      detected_types <- c(detected_types, toupper(ftype))
+    }
+
+    if (length(detected_types) > 0) {
+      showNotification(
+        paste0("Supplementary detected: ", paste(detected_types, collapse = ", ")),
+        type = "message", duration = 5
+      )
+    }
+  })
+
   # upload status display — per-file ticks with detected month
   output$upload_status <- renderUI({
-    files <- list(
+    core_files <- list(
       A01   = uploaded_files$a01,
       HR1   = uploaded_files$hr1,
       X09   = uploaded_files$x09,
       RTISA = uploaded_files$rtisa
     )
-    n_up <- sum(!vapply(files, is.null, logical(1)))
+    extra_files <- list(
+      CLA01 = uploaded_files$cla01,
+      X02   = uploaded_files$x02,
+      `OECD Unemp` = uploaded_files$oecd_unemp,
+      `OECD Emp`   = uploaded_files$oecd_emp,
+      `OECD Inact` = uploaded_files$oecd_inact
+    )
+
+    all_files <- c(core_files, extra_files)
+    n_up <- sum(!vapply(all_files, is.null, logical(1)))
     if (n_up == 0) return(NULL)
 
-    tags <- lapply(names(files), function(nm) {
-      if (!is.null(files[[nm]])) {
+    core_tags <- lapply(names(core_files), function(nm) {
+      if (!is.null(core_files[[nm]])) {
         span(class = "govuk-tag govuk-tag--green", style = "margin-right: 4px;",
              paste0(nm, " \u2713"))
       } else {
@@ -745,13 +847,27 @@ server <- function(input, output, session) {
       }
     })
 
+    # Only show extra file tags if any are uploaded
+    n_extra <- sum(!vapply(extra_files, is.null, logical(1)))
+    extra_tags <- if (n_extra > 0) {
+      lapply(names(extra_files), function(nm) {
+        if (!is.null(extra_files[[nm]])) {
+          span(class = "govuk-tag govuk-tag--blue", style = "margin-right: 4px;",
+               paste0(nm, " \u2713"))
+        }
+      })
+    }
+
     mm <- reference_manual_month()
     month_line <- if (!is.null(mm) && nzchar(mm) && !is.null(uploaded_files$a01)) {
       div(style = "margin-top: 6px; font-weight: 600;",
           paste0("Reference month: ", manual_month_to_display(mm)))
     }
 
-    div(style = "margin-top: 10px;", tagList(tags), month_line)
+    div(style = "margin-top: 10px;",
+        tagList(core_tags),
+        if (n_extra > 0) div(style = "margin-top: 4px;", tagList(extra_tags)),
+        month_line)
   })
 
   # Detect vacancies periods from A01 and populate manual dropdown
@@ -1356,6 +1472,15 @@ server <- function(input, output, session) {
           tmp_xlsx <- tempfile(fileext = ".xlsx")
           excel_env$create_audit_workbook(
             output_path = tmp_xlsx,
+            file_a01 = uploaded_files$a01,
+            file_hr1 = uploaded_files$hr1,
+            file_x09 = uploaded_files$x09,
+            file_rtisa = uploaded_files$rtisa,
+            file_cla01 = uploaded_files$cla01,
+            file_x02 = uploaded_files$x02,
+            file_oecd_unemp = uploaded_files$oecd_unemp,
+            file_oecd_emp = uploaded_files$oecd_emp,
+            file_oecd_inact = uploaded_files$oecd_inact,
             calculations_path = calculations_path,
             config_path = config_path,
             vacancies_mode = vac_mode,
@@ -1363,7 +1488,7 @@ server <- function(input, output, session) {
             manual_month_override = month_override,
             verbose = FALSE
           )
-          
+
           incProgress(0.15, detail = "Step 4/4: Preparing download...")
           ok <- file.copy(tmp_xlsx, file, overwrite = TRUE)
           if (!isTRUE(ok) || !file.exists(file)) {
@@ -1660,6 +1785,15 @@ server <- function(input, output, session) {
           tmp_xlsx <- tempfile(fileext = ".xlsx")
           excel_env$create_audit_workbook(
             output_path = tmp_xlsx,
+            file_a01 = uploaded_files$a01,
+            file_hr1 = uploaded_files$hr1,
+            file_x09 = uploaded_files$x09,
+            file_rtisa = uploaded_files$rtisa,
+            file_cla01 = uploaded_files$cla01,
+            file_x02 = uploaded_files$x02,
+            file_oecd_unemp = uploaded_files$oecd_unemp,
+            file_oecd_emp = uploaded_files$oecd_emp,
+            file_oecd_inact = uploaded_files$oecd_inact,
             calculations_path = calculations_path,
             config_path = config_path,
             verbose = FALSE
