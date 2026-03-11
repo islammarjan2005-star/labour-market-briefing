@@ -991,11 +991,11 @@ server <- function(input, output, session) {
       manual_period_labels$vac_latest  <- lab_latest
       
       if (identical(lab_aligned, lab_latest)) {
-        choices <- setNames(lab_latest, paste0(lab_latest, " (only period)"))
+        choices <- setNames(lab_aligned, paste0(lab_aligned, " (only period)"))
       } else {
         choices <- setNames(
-          c(lab_latest, lab_aligned),
-          c(paste0(lab_latest, " (default)"), lab_aligned)
+          c(lab_aligned, lab_latest),
+          c(paste0(lab_aligned, " (default)"), lab_latest)
         )
       }
       updateSelectInput(session, "manual_vacancies_period", choices = choices, selected = choices[1])
@@ -1248,12 +1248,12 @@ server <- function(input, output, session) {
     
     if (nzchar(vac_lab_aligned) && nzchar(vac_lab_latest)) {
       vac_choices <- setNames(
-        c(vac_lab_latest, vac_lab_aligned),
-        c(paste0(vac_lab_latest, " (default)"), vac_lab_aligned)
+        c(vac_lab_aligned, vac_lab_latest),
+        c(paste0(vac_lab_aligned, " (default)"), vac_lab_latest)
       )
       updateSelectInput(session, "vacancies_period",
                         choices = vac_choices,
-                        selected = vac_lab_latest)
+                        selected = vac_lab_aligned)
     }
     if (nzchar(pay_lab_aligned) && nzchar(pay_lab_latest)) {
       pay_choices <- setNames(
