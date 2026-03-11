@@ -500,11 +500,11 @@ run_calculations_from_excel <- function(manual_month = NULL,
     elec_base <- .avg_by_dates(pay_df$m, pay_df$v, as.Date(c("2024-04-01", "2024-05-01", "2024-06-01")))
     payroll_de <- if (!is.na(payroll_cur) && !is.na(elec_base)) payroll_cur - (elec_base / 1000) else NA_real_
 
-    # Flash (single latest month — use RTISA's own latest date)
-    flash_anchor <- rtisa_latest
-    flash_val    <- .val_by_date(pay_df$m, pay_df$v, rtisa_latest)
-    flash_prev_m <- .val_by_date(pay_df$m, pay_df$v, rtisa_latest %m-% months(1))
-    flash_prev_y <- .val_by_date(pay_df$m, pay_df$v, rtisa_latest %m-% months(12))
+    # Flash (single latest month — always use the true latest date in the file)
+    flash_anchor <- pay_df$m[nrow(pay_df)]
+    flash_val    <- .val_by_date(pay_df$m, pay_df$v, flash_anchor)
+    flash_prev_m <- .val_by_date(pay_df$m, pay_df$v, flash_anchor %m-% months(1))
+    flash_prev_y <- .val_by_date(pay_df$m, pay_df$v, flash_anchor %m-% months(12))
     flash_elec   <- .val_by_date(pay_df$m, pay_df$v, as.Date("2024-06-01"))
 
     payroll_flash_cur <- if (!is.na(flash_val)) flash_val / 1e6 else NA_real_
