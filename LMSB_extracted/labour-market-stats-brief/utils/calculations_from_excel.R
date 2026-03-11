@@ -402,15 +402,36 @@ run_calculations_from_excel <- function(manual_month = NULL,
 
   tbl_19 <- if (!is.null(file_a01)) .read_sheet(file_a01, "19") else data.frame()
 
-  # Vacancies: use override if provided, otherwise LFS-aligned
-  vac_end <- if (!is.null(vac_end_override)) vac_end_override else lfs_end_cur
-  vac_lab_cur   <- .lfs_label(vac_end)
-  vac_lab_q     <- .lfs_label(vac_end %m-% months(3))
-  vac_lab_y     <- .lfs_label(vac_end %m-% months(12))
+  # Vacancies: always use the latest available period in Sheet 19 for lines/output.
+  # The dropdown override only affects the dashboard preview (handled in app.R).
   vac_lab_covid <- "Jan-Mar 2020"
   vac_lab_elec  <- .lfs_label(as.Date("2024-06-01"))  # "Apr-Jun 2024"
 
   if (nrow(tbl_19) > 0 && ncol(tbl_19) >= 3) {
+    # Find the latest period in the sheet by scanning column 1 for LFS-style labels
+    month_map_vac <- c(jan=1,feb=2,mar=3,apr=4,may=5,jun=6,jul=7,aug=8,sep=9,oct=10,nov=11,dec=12)
+    col1 <- trimws(as.character(tbl_19[[1]]))
+    vac_dates <- vapply(col1, function(lbl) {
+      mons <- regmatches(lbl, gregexpr("[A-Za-z]{3}", lbl))[[1]]
+      yrs  <- regmatches(lbl, gregexpr("[0-9]{4}", lbl))[[1]]
+      if (length(mons) < 2 || length(yrs) < 1) return(as.numeric(NA))
+      end_m <- month_map_vac[tolower(mons[2])]
+      yr <- suppressWarnings(as.integer(yrs[1]))
+      if (is.na(end_m) || is.na(yr)) return(as.numeric(NA))
+      as.numeric(as.Date(sprintf("%04d-%02d-01", yr, end_m)))
+    }, numeric(1))
+    valid_vac <- which(!is.na(vac_dates) & !is.na(suppressWarnings(as.numeric(gsub("[^0-9.-]", "", as.character(tbl_19[[3]]))))))
+    if (length(valid_vac) > 0) {
+      latest_idx <- valid_vac[which.max(vac_dates[valid_vac])]
+      vac_end <- as.Date(vac_dates[latest_idx], origin = "1970-01-01")
+    } else {
+      vac_end <- if (!is.null(vac_end_override)) vac_end_override else lfs_end_cur
+    }
+
+    vac_lab_cur <- .lfs_label(vac_end)
+    vac_lab_q   <- .lfs_label(vac_end %m-% months(3))
+    vac_lab_y   <- .lfs_label(vac_end %m-% months(12))
+
     r_cur   <- .find_row(tbl_19, vac_lab_cur)
     vac_cur <- .cell_num(tbl_19, r_cur, 3)
     vac_dq  <- vac_cur - .cell_num(tbl_19, .find_row(tbl_19, vac_lab_q), 3)
@@ -418,6 +439,7 @@ run_calculations_from_excel <- function(manual_month = NULL,
     vac_dc  <- vac_cur - .cell_num(tbl_19, .find_row(tbl_19, vac_lab_covid), 3)
     vac_de  <- vac_cur - .cell_num(tbl_19, .find_row(tbl_19, vac_lab_elec), 3)
   } else {
+    vac_end <- if (!is.null(vac_end_override)) vac_end_override else lfs_end_cur
     vac_cur <- vac_dq <- vac_dy <- vac_dc <- vac_de <- NA_real_
   }
 
