@@ -305,6 +305,8 @@ generate_manual_word_output <- function(
     file_oecd_unemp = NULL,
     file_oecd_emp   = NULL,
     file_oecd_inact = NULL,
+    vac_end_override = NULL,
+    payroll_end_override = NULL,
     template_path = "utils/ManualDB.docx",
     output_path   = "utils/ManualDBoutput.docx",
     verbose = TRUE
@@ -317,7 +319,9 @@ generate_manual_word_output <- function(
   source("utils/calculations_from_excel.R", local = FALSE)
   manual_month <- run_calculations_from_excel(manual_month,
                                               file_a01 = file_a01, file_hr1 = file_hr1,
-                                              file_x09 = file_x09, file_rtisa = file_rtisa)
+                                              file_x09 = file_x09, file_rtisa = file_rtisa,
+                                              vac_end_override = vac_end_override,
+                                              payroll_end_override = payroll_end_override)
   
   if (verbose) message("[manual] Calculations complete for ", manual_month)
   

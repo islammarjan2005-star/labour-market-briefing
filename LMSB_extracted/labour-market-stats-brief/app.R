@@ -1777,6 +1777,8 @@ server <- function(input, output, session) {
               file_oecd_unemp = uploaded_files$oecd_unemp,
               file_oecd_emp   = uploaded_files$oecd_emp,
               file_oecd_inact = uploaded_files$oecd_inact,
+              vac_end_override = .parse_period_end(input$manual_vacancies_period),
+              payroll_end_override = .parse_period_end(input$manual_payroll_period),
               template_path = manual_template,
               output_path = file,
               verbose = FALSE
