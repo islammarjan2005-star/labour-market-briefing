@@ -3,7 +3,6 @@
 # requirescalculations.r to have been sourced
 
 suppressPackageStartupMessages({
-  library(glue)
   library(dplyr)
   library(lubridate)
 })
@@ -268,10 +267,11 @@ generate_summary <- function() {
   py_pct_y <- pct_from_delta(py_cur, py_dy)
   py_pct_q <- pct_from_delta(py_cur, py_dq)
 
-  line1 <- glue(
-    "The number of payrolled employees (PAYE) {ifelse(is.na(py_dy) || py_dy == 0, 'was unchanged', ifelse(py_dy < 0, 'fell', 'rose'))} by {fmt_int_1k(abs(py_dy) * 1000)} ({fmt_pct_unsigned(py_pct_y)}) on the year, ",
-    "and {ifelse(is.na(py_dq) || py_dq == 0, 'was unchanged', ifelse(py_dq < 0, 'fell', 'rose'))} by {fmt_int_1k(abs(py_dq) * 1000)} ({fmt_pct_unsigned(py_pct_q)}) on the quarter in {lfs_lbl} (the period comparable with LFS).",
-    .comment = ""
+  py_dir_y <- if (is.na(py_dy) || py_dy == 0) "was unchanged" else if (py_dy < 0) "fell" else "rose"
+  py_dir_q <- if (is.na(py_dq) || py_dq == 0) "was unchanged" else if (py_dq < 0) "fell" else "rose"
+  line1 <- paste0(
+    "The number of payrolled employees (PAYE) ", py_dir_y, " by ", fmt_int_1k(abs(py_dy) * 1000), " (", fmt_pct_unsigned(py_pct_y), ") on the year, ",
+    "and ", py_dir_q, " by ", fmt_int_1k(abs(py_dq) * 1000), " (", fmt_pct_unsigned(py_pct_q), ") on the quarter in ", lfs_lbl, " (the period comparable with LFS)."
   )
 
   # payroll (flash, latest single month)
@@ -286,10 +286,11 @@ generate_summary <- function() {
   pf_base_m <- if (!is.na(pf_cur_n) && !is.na(pf_dm_k)) pf_cur_n - pf_dm_k * 1000 else NA_real_
   pf_pct_m <- if (!is.na(pf_base_m) && pf_base_m != 0) (pf_dm_k * 1000) / pf_base_m * 100 else NA_real_
 
-  line2 <- glue(
-    "The ‘flash’ estimate for {payroll_flash_lbl} suggests payroll employees {ifelse(is.na(pf_dy_k) || pf_dy_k == 0, ‘were unchanged’, ifelse(pf_dy_k < 0, ‘fell’, ‘rose’))} by {fmt_int_1k(abs(pf_dy_k) * 1000)} ({fmt_pct_unsigned(pf_pct_y)}) on the year, ",
-    "and {ifelse(is.na(pf_dm_k) || pf_dm_k == 0, ‘were unchanged’, ifelse(pf_dm_k < 0, ‘fell’, ‘rose’))} by {fmt_int_1k(abs(pf_dm_k) * 1000)} ({fmt_pct_unsigned(pf_pct_m)}) on the month, although this is prone to revision.",
-    .comment = ""
+  pf_dir_y <- if (is.na(pf_dy_k) || pf_dy_k == 0) "were unchanged" else if (pf_dy_k < 0) "fell" else "rose"
+  pf_dir_m <- if (is.na(pf_dm_k) || pf_dm_k == 0) "were unchanged" else if (pf_dm_k < 0) "fell" else "rose"
+  line2 <- paste0(
+    "The ‘flash’ estimate for ", payroll_flash_lbl, " suggests payroll employees ", pf_dir_y, " by ", fmt_int_1k(abs(pf_dy_k) * 1000), " (", fmt_pct_unsigned(pf_pct_y), ") on the year, ",
+    "and ", pf_dir_m, " by ", fmt_int_1k(abs(pf_dm_k) * 1000), " (", fmt_pct_unsigned(pf_pct_m), ") on the month, although this is prone to revision."
   )
 
   # workforce jobs
@@ -297,10 +298,13 @@ generate_summary <- function() {
   wfj_dq <- wfj$dq; wfj_dy <- wfj$dy
   wfj_pct_q <- wfj$pct_q; wfj_pct_y <- wfj$pct_y
 
-  line3 <- glue(
-    "Workforce jobs data shows {ifelse(is.na(wfj_dq) || wfj_dq >= 0, 'an increase', 'a fall')} of {fmt_int_1k(abs(wfj_dq) * 1000)} jobs on the quarter ({ifelse(is.na(wfj_pct_q), '\u2014', paste0(ifelse(is.na(wfj_pct_q) || wfj_pct_q >= 0, '', '-'), fmt_pct_unsigned(wfj_pct_q))) }). ",
-    "On the year, jobs {ifelse(is.na(wfj_dy) || wfj_dy >= 0, 'rose', 'fell')} by {fmt_int_1k(abs(wfj_dy) * 1000)} ({ifelse(is.na(wfj_pct_y), '\u2014', paste0(ifelse(is.na(wfj_pct_y) || wfj_pct_y >= 0, '', '-'), fmt_pct_unsigned(wfj_pct_y))) }).",
-    .comment = ""
+  wfj_dir_q <- if (is.na(wfj_dq) || wfj_dq >= 0) "an increase" else "a fall"
+  wfj_dir_y <- if (is.na(wfj_dy) || wfj_dy >= 0) "rose" else "fell"
+  wfj_pct_q_str <- if (is.na(wfj_pct_q)) "\u2014" else paste0(if (wfj_pct_q < 0) "-" else "", fmt_pct_unsigned(wfj_pct_q))
+  wfj_pct_y_str <- if (is.na(wfj_pct_y)) "\u2014" else paste0(if (wfj_pct_y < 0) "-" else "", fmt_pct_unsigned(wfj_pct_y))
+  line3 <- paste0(
+    "Workforce jobs data shows ", wfj_dir_q, " of ", fmt_int_1k(abs(wfj_dq) * 1000), " jobs on the quarter (", wfj_pct_q_str, "). ",
+    "On the year, jobs ", wfj_dir_y, " by ", fmt_int_1k(abs(wfj_dy) * 1000), " (", wfj_pct_y_str, ")."
   )
 
   # vacancies (latest)
@@ -309,9 +313,8 @@ generate_summary <- function() {
   vc_pct_q <- pct_from_delta(vc_cur, vc_dq)
 
   vac_change_word <- if (is.na(vc_dq) || vc_dq == 0) "were unchanged" else if (vc_dq < 0) "fell" else "rose"
-  line4 <- glue(
-    "Vacancies {vac_change_word} by {fmt_int_1k(abs(vc_dq) * 1000)} ({fmt_pct_unsigned(vc_pct_q)}) on the quarter to {fmt_int_1k(vc_cur * 1000)} in {vac_lbl}.",
-    .comment = ""
+  line4 <- paste0(
+    "Vacancies ", vac_change_word, " by ", fmt_int_1k(abs(vc_dq) * 1000), " (", fmt_pct_unsigned(vc_pct_q), ") on the quarter to ", fmt_int_1k(vc_cur * 1000), " in ", vac_lbl, "."
   )
 
   # lfs rates (current + quarter)
@@ -322,10 +325,12 @@ generate_summary <- function() {
   inact_rt_cur <- if (exists("inact_rt_cur", inherits = TRUE)) safe_num(get("inact_rt_cur", inherits=TRUE)) else NA_real_
   inact_rt_dq  <- if (exists("inact_rt_dq", inherits = TRUE)) safe_num(get("inact_rt_dq", inherits=TRUE)) else NA_real_
 
-  line5 <- glue(
-    "Labour Force Survey (LFS) suggests that in {lfs_lbl}, the employment rate {ifelse(is.na(emp_rt_dq) || emp_rt_dq == 0, 'was unchanged', ifelse(emp_rt_dq < 0, 'fell', 'rose'))} to {.fmt_rate(emp_rt_cur)}% ({fmt_signed_pp(emp_rt_dq)} compared to the previous quarter). ",
-    "On the quarter, unemployment {ifelse(is.na(unemp_rt_dq) || unemp_rt_dq >= 0, 'rose', 'fell')} to {.fmt_rate(unemp_rt_cur)}% ({fmt_signed_pp(unemp_rt_dq)}) and inactivity {ifelse(is.na(inact_rt_dq) || inact_rt_dq > 0, 'rose', 'fell')} to {.fmt_rate(inact_rt_cur)}% ({fmt_signed_pp(inact_rt_dq)}).",
-    .comment = ""
+  emp_dir <- if (is.na(emp_rt_dq) || emp_rt_dq == 0) "was unchanged" else if (emp_rt_dq < 0) "fell" else "rose"
+  unemp_dir <- if (is.na(unemp_rt_dq) || unemp_rt_dq >= 0) "rose" else "fell"
+  inact_dir <- if (is.na(inact_rt_dq) || inact_rt_dq > 0) "rose" else "fell"
+  line5 <- paste0(
+    "Labour Force Survey (LFS) suggests that in ", lfs_lbl, ", the employment rate ", emp_dir, " to ", .fmt_rate(emp_rt_cur), "% (", fmt_signed_pp(emp_rt_dq), " compared to the previous quarter). ",
+    "On the quarter, unemployment ", unemp_dir, " to ", .fmt_rate(unemp_rt_cur), "% (", fmt_signed_pp(unemp_rt_dq), ") and inactivity ", inact_dir, " to ", .fmt_rate(inact_rt_cur), "% (", fmt_signed_pp(inact_rt_dq), ")."
   )
 
   # youth unemployment (18-24)
@@ -344,9 +349,11 @@ generate_summary <- function() {
     if (length(x) == 0 || is.null(x) || is.na(x)) return("0")
     format(abs(round(as.numeric(x)/1000)), big.mark = ",")
   }
-  line7 <- glue(
-    "In contrast, monthly payrolled employees {ifelse(is.null(pa$d1) || length(pa$d1) == 0 || is.na(pa$d1) || pa$d1 == 0, 'were unchanged', ifelse(pa$d1 < 0, 'fell', 'rose'))} by {fmt_k_abs(pa$d1)}k for {pa$a1}, followed by {pa$a2} ({ifelse(is.null(pa$d2) || length(pa$d2) == 0 || is.na(pa$d2) || pa$d2 == 0, 'were unchanged', ifelse(pa$d2 < 0, 'fell', 'rose'))} by {fmt_k_abs(pa$d2)}k) and {pa$a3} ({ifelse(is.null(pa$d3) || length(pa$d3) == 0 || is.na(pa$d3) || pa$d3 == 0, 'were unchanged', ifelse(pa$d3 < 0, 'fell', 'rose'))} by {fmt_k_abs(pa$d3)}k).",
-    .comment = ""
+  pa_dir1 <- if (is.null(pa$d1) || length(pa$d1) == 0 || is.na(pa$d1) || pa$d1 == 0) "were unchanged" else if (pa$d1 < 0) "fell" else "rose"
+  pa_dir2 <- if (is.null(pa$d2) || length(pa$d2) == 0 || is.na(pa$d2) || pa$d2 == 0) "were unchanged" else if (pa$d2 < 0) "fell" else "rose"
+  pa_dir3 <- if (is.null(pa$d3) || length(pa$d3) == 0 || is.na(pa$d3) || pa$d3 == 0) "were unchanged" else if (pa$d3 < 0) "fell" else "rose"
+  line7 <- paste0(
+    "In contrast, monthly payrolled employees ", pa_dir1, " by ", fmt_k_abs(pa$d1), "k for ", pa$a1, ", followed by ", pa$a2, " (", pa_dir2, " by ", fmt_k_abs(pa$d2), "k) and ", pa$a3, " (", pa_dir3, " by ", fmt_k_abs(pa$d3), "k)."
   )
 
   # wages (nominal + real)
@@ -356,10 +363,12 @@ generate_summary <- function() {
   wages_total_qchange <- if (exists("wages_total_qchange", inherits = TRUE)) safe_num(get("wages_total_qchange", inherits=TRUE)) else NA_real_
   wages_reg_qchange <- if (exists("wages_reg_qchange", inherits = TRUE)) safe_num(get("wages_reg_qchange", inherits=TRUE)) else NA_real_
 
-  line8 <- glue(
-    "Annual wage growth in average weekly earnings (inc. bonuses) {ifelse(is.na(wages_total_qchange) || wages_total_qchange < 0, 'fell', 'rose')} to {fmt_pct(latest_wages)} in {wages_lbl} ({fmt_signed_pp(wages_total_qchange)} from the previous 3-month period). ",
-    "Wage growth excl. bonuses also {ifelse(is.na(wages_reg_qchange) || wages_reg_qchange < 0, 'fell', 'rose')} to {fmt_pct(latest_regular_cash)} ({fmt_signed_pp(wages_reg_qchange)}). Real wage growth (inc. bonuses) {ifelse(is.na(latest_wages_cpi) || latest_wages_cpi < 0, 'dropped', 'rose')} to {fmt_pct(latest_wages_cpi)}.",
-    .comment = ""
+  wages_dir_total <- if (is.na(wages_total_qchange) || wages_total_qchange < 0) "fell" else "rose"
+  wages_dir_reg <- if (is.na(wages_reg_qchange) || wages_reg_qchange < 0) "fell" else "rose"
+  wages_dir_real <- if (is.na(latest_wages_cpi) || latest_wages_cpi < 0) "dropped" else "rose"
+  line8 <- paste0(
+    "Annual wage growth in average weekly earnings (inc. bonuses) ", wages_dir_total, " to ", fmt_pct(latest_wages), " in ", wages_lbl, " (", fmt_signed_pp(wages_total_qchange), " from the previous 3-month period). ",
+    "Wage growth excl. bonuses also ", wages_dir_reg, " to ", fmt_pct(latest_regular_cash), " (", fmt_signed_pp(wages_reg_qchange), "). Real wage growth (inc. bonuses) ", wages_dir_real, " to ", fmt_pct(latest_wages_cpi), "."
   )
 
   # public vs private (yoy)
@@ -371,9 +380,8 @@ generate_summary <- function() {
   first_val <- ifelse(is.na(wages_total_public) || is.na(wages_total_private) || wages_total_public >= wages_total_private, wages_total_public, wages_total_private)
   second_sector <- ifelse(is.na(wages_total_public) || is.na(wages_total_private) || wages_total_public >= wages_total_private, "private sector", "public sector")
   second_val <- ifelse(is.na(wages_total_public) || is.na(wages_total_private) || wages_total_public >= wages_total_private, wages_total_private, wages_total_public)
-  line9 <- glue(
-    "Pay growth was driven by the {first_sector} ({fmt_pct(first_val)}), compared to {fmt_pct(second_val)} in the {second_sector}.",
-    .comment = ""
+  line9 <- paste0(
+    "Pay growth was driven by the ", first_sector, " (", fmt_pct(first_val), "), compared to ", fmt_pct(second_val), " in the ", second_sector, "."
   )
 
   # redundancies + hr1
@@ -381,10 +389,11 @@ generate_summary <- function() {
   redund_dq <- if (exists("redund_dq", inherits = TRUE)) safe_num(get("redund_dq", inherits=TRUE)) else NA_real_
   hr1_dm <- if (exists("hr1_dm", inherits = TRUE)) safe_num(get("hr1_dm", inherits=TRUE)) else NA_real_
 
-  line10 <- glue(
-    "LFS redundancies {ifelse(is.na(redund_dq) || redund_dq >= 0, 'rose', 'fell')} on the quarter to {fmt_int_1k(redund_cur * 1000)} in {lfs_lbl} ({fmt_signed_int_1k(redund_dq * 1000)} from the previous quarter). ",
-    "HR1 redundancies (notifications of redundancies) {ifelse(is.na(hr1_dm) || hr1_dm >= 0, 'rose', 'fell')} by {fmt_int_1k(abs(hr1_dm))} on the month.",
-    .comment = ""
+  redund_dir <- if (is.na(redund_dq) || redund_dq >= 0) "rose" else "fell"
+  hr1_dir <- if (is.na(hr1_dm) || hr1_dm >= 0) "rose" else "fell"
+  line10 <- paste0(
+    "LFS redundancies ", redund_dir, " on the quarter to ", fmt_int_1k(redund_cur * 1000), " in ", lfs_lbl, " (", fmt_signed_int_1k(redund_dq * 1000), " from the previous quarter). ",
+    "HR1 redundancies (notifications of redundancies) ", hr1_dir, " by ", fmt_int_1k(abs(hr1_dm)), " on the month."
   )
 
   list(
