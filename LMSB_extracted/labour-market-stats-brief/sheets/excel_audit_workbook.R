@@ -109,6 +109,123 @@ if (!exists("parse_manual_month", inherits = TRUE)) {
 .data_font <- function() createStyle(fontName = "Arial", fontSize = 10)
 
 # ============================================================================
+# EXCEL FORMULA HELPERS
+# ============================================================================
+
+# Convert column number to Excel letter(s): 1→A, 26→Z, 27→AA
+.col_letter <- function(n) {
+  result <- ""
+  while (n > 0) {
+    n <- n - 1
+    result <- paste0(LETTERS[(n %% 26) + 1], result)
+    n <- n %/% 26
+  }
+  result
+}
+
+# Find the output row number for a label in source data
+# tbl: source data frame, date_col: column to search, target_label: text to find
+# data_start_row: the output row where source data begins
+.find_output_row <- function(tbl, date_col, target_label, data_start_row) {
+  col_vals <- trimws(as.character(tbl[[date_col]]))
+  idx <- which(tolower(col_vals) == tolower(trimws(target_label)))
+  if (length(idx) == 0) return(NA_integer_)
+  idx[1] + data_start_row - 1
+}
+
+# Find output row for a date value (matching parsed dates)
+.find_output_row_date <- function(tbl, date_col, target_date, data_start_row) {
+  dates <- .detect_dates(tbl[[date_col]])
+  idx <- which(dates == target_date)
+  if (length(idx) == 0) return(NA_integer_)
+  idx[1] + data_start_row - 1
+}
+
+# Formula: last value in a column — INDEX(CL$sr:CL$max,COUNTA(CL$sr:CL$max))
+.fml_last <- function(cl, sr, off = 0) {
+  rng <- sprintf("%s$%d:%s$1048576", cl, sr, cl)
+  if (off == 0) sprintf("INDEX(%s,COUNTA(%s))", rng, rng)
+  else sprintf("INDEX(%s,COUNTA(%s)%+d)", rng, rng, off)
+}
+
+# Formula: average of last n values — AVERAGE(OFFSET(INDEX(...),-n+1,0,n,1))
+.fml_avg_last <- function(cl, sr, n = 3) {
+  rng <- sprintf("%s$%d:%s$1048576", cl, sr, cl)
+  sprintf("AVERAGE(OFFSET(INDEX(%s,COUNTA(%s)),-%d,0,%d,1))", rng, rng, n - 1, n)
+}
+
+# Formula: average at offset from end — AVERAGE(OFFSET(INDEX(...),off,0,n,1))
+.fml_avg_offset <- function(cl, sr, off, n = 3) {
+  rng <- sprintf("%s$%d:%s$1048576", cl, sr, cl)
+  sprintf("AVERAGE(OFFSET(INDEX(%s,COUNTA(%s)),%d,0,%d,1))", rng, rng, off, n)
+}
+
+# Formula: change = avg_last_3 - avg_at_offset
+.fml_change_avg <- function(cl, sr, off) {
+  paste0(.fml_avg_last(cl, sr), "-", .fml_avg_offset(cl, sr, off))
+}
+
+# Formula: change vs fixed row range = avg_last_3 - AVERAGE(CL$r1:CL$r2)
+.fml_change_fixed <- function(cl, sr, r1, r2) {
+  sprintf("%s-AVERAGE(%s$%d:%s$%d)", .fml_avg_last(cl, sr), cl, r1, cl, r2)
+}
+
+# Formula: change vs single fixed row = last - CL$r
+.fml_change_single <- function(cl, sr, r) {
+  sprintf("%s-%s$%d", .fml_last(cl, sr), cl, r)
+}
+
+# Formula: pct change = avg_last_3 / avg_at_offset - 1
+.fml_pct_avg <- function(cl, sr, off) {
+  sprintf("%s/%s-1", .fml_avg_last(cl, sr), .fml_avg_offset(cl, sr, off))
+}
+
+# Formula: pct change vs fixed row range = avg_last_3 / AVERAGE(CL$r1:CL$r2) - 1
+.fml_pct_fixed <- function(cl, sr, r1, r2) {
+  sprintf("%s/AVERAGE(%s$%d:%s$%d)-1", .fml_avg_last(cl, sr), cl, r1, cl, r2)
+}
+
+# Formula: simple INDEX change = last - last_at_offset
+.fml_idx_change <- function(cl, sr, off) {
+  sprintf("%s-%s", .fml_last(cl, sr), .fml_last(cl, sr, -off))
+}
+
+# Formula: simple INDEX pct change = last / last_at_offset - 1
+.fml_idx_pct <- function(cl, sr, off) {
+  sprintf("%s/%s-1", .fml_last(cl, sr), .fml_last(cl, sr, -off))
+}
+
+# Formula: INDEX change vs fixed row = last - CL$r
+.fml_idx_change_fixed <- function(cl, sr, r) {
+  sprintf("%s-%s$%d", .fml_last(cl, sr), cl, r)
+}
+
+# Formula: INDEX pct vs fixed row = last / CL$r - 1
+.fml_idx_pct_fixed <- function(cl, sr, r) {
+  sprintf("%s/%s$%d-1", .fml_last(cl, sr), cl, r)
+}
+
+# Formula: MAX of column
+.fml_max <- function(cl, sr) {
+  sprintf("MAX(%s$%d:%s$1048576)", cl, sr, cl)
+}
+
+# Formula: RANK
+.fml_rank <- function(cell, range_start, range_end) {
+  sprintf("RANK(%s,%s:%s)", cell, range_start, range_end)
+}
+
+# Formula: AVERAGE of fixed range
+.fml_avg_range <- function(cl, r1, r2) {
+  sprintf("AVERAGE(%s$%d:%s$%d)", cl, r1, cl, r2)
+}
+
+# Helper to write a formula cell
+.wf <- function(wb, sn, formula, row, col) {
+  writeFormula(wb, sn, formula, startRow = row, startCol = col)
+}
+
+# ============================================================================
 # SHEET WRITING HELPERS
 # ============================================================================
 
@@ -436,56 +553,62 @@ create_audit_workbook <- function(
       sn <- "1. Payrolled employees (UK)"
       addWorksheet(wb, sn, tabColour = "#548235")
 
-      # Comparison rows 1-3
-      writeData(wb, sn, "", startRow = 1, startCol = 1)
-      for (ci in 2:6) {
-        lbl <- c("Current", "Change on month (singular)", "Change on quarter",
-                 "Change year on year", "Change since Covid-19")[ci - 1]
-        writeData(wb, sn, lbl, startRow = 1, startCol = ci)
-        addStyle(wb, sn, .hs(), rows = 1, cols = ci, stack = TRUE)
-      }
-
-      # Row 2: Number, Row 3: %
-      if (exists("pay_m") && !is.null(pay_m$cur)) {
-        writeData(wb, sn, "Number", startRow = 2, startCol = 1)
-        addStyle(wb, sn, .cmp_label(), rows = 2, cols = 1, stack = TRUE)
-        cur_val <- if (!is.na(pay_m$cur)) pay_m$cur * 1000 else NA
-        writeData(wb, sn, cur_val, startRow = 2, startCol = 2)
-
-        # Single month change (latest minus previous)
-        if (exists("pay_df") && nrow(pay_df) > 1) {
-          latest_single <- pay_df$v[nrow(pay_df)]
-          prev_single   <- pay_df$v[nrow(pay_df) - 1]
-          writeData(wb, sn, latest_single - prev_single, startRow = 2, startCol = 3)
-        }
-        if (!is.na(pay_m$dq)) writeData(wb, sn, pay_m$dq * 1000, startRow = 2, startCol = 4)
-        if (!is.na(pay_m$dy)) writeData(wb, sn, pay_m$dy * 1000, startRow = 2, startCol = 5)
-        if (!is.na(pay_m$dc)) writeData(wb, sn, pay_m$dc * 1000, startRow = 2, startCol = 6)
-
-        # Row 3: percentages
-        writeData(wb, sn, "%", startRow = 3, startCol = 1)
-        addStyle(wb, sn, .cmp_label(), rows = 3, cols = 1, stack = TRUE)
-        if (!is.na(pay_m$dq) && !is.na(pay_m$cur) && pay_m$cur != 0) {
-          pc_val <- pay_m$cur * 1000
-          if (exists("pay_df") && nrow(pay_df) > 1) {
-            writeData(wb, sn, (pay_df$v[nrow(pay_df)] - pay_df$v[nrow(pay_df) - 1]) / pc_val,
-                      startRow = 3, startCol = 3)
-          }
-          writeData(wb, sn, pay_m$dq / pay_m$cur, startRow = 3, startCol = 4)
-          writeData(wb, sn, pay_m$dy / pay_m$cur, startRow = 3, startCol = 5)
-          writeData(wb, sn, pay_m$dc / pay_m$cur, startRow = 3, startCol = 6)
-        }
-        addStyle(wb, sn, .pct_fmt(), rows = 3, cols = 3:6, gridExpand = TRUE, stack = TRUE)
-        addStyle(wb, sn, .num_fmt(), rows = 2, cols = 2:6, gridExpand = TRUE, stack = TRUE)
-      }
-      addStyle(wb, sn, .cmp_sep(), rows = 3, cols = 1:6, gridExpand = TRUE, stack = TRUE)
-
       # Write original data from row 5
       writeData(wb, sn, tbl_rtisa, colNames = FALSE, startRow = 5)
       addStyle(wb, sn, .data_font(), rows = 5:(5 + nrow(tbl_rtisa)),
                cols = 1:ncol(tbl_rtisa), gridExpand = TRUE, stack = TRUE)
       setColWidths(wb, sn, cols = 1, widths = 18)
-      setColWidths(wb, sn, cols = 2:min(ncol(tbl_rtisa), 6), widths = 18)
+      setColWidths(wb, sn, cols = 2:max(ncol(tbl_rtisa), 10), widths = 18)
+
+      # Find data start row: first row with a parseable date in col A
+      rtisa_text <- trimws(as.character(tbl_rtisa[[1]]))
+      rtisa_date_rows <- which(grepl("^(January|February|March|April|May|June|July|August|September|October|November|December)\\s+\\d{4}$", rtisa_text, ignore.case = TRUE))
+      dsr <- if (length(rtisa_date_rows) > 0) rtisa_date_rows[1] + 4 else 11  # output row
+
+      # Find baseline rows dynamically
+      covid_r <- .find_output_row(tbl_rtisa, 1, "December 2019", 5)
+      elec_r  <- .find_output_row(tbl_rtisa, 1, "July 2024", 5)
+      office_r <- elec_r  # "coming into office" = July 2024
+      cl <- "$B"
+
+      # Header row 1
+      hdrs <- c("Current", "Change on month (singular)", "Change on quarter",
+                "Change year on year", "Change since Covid-19",
+                "Change since 2024 election", "Change since coming into office",
+                "Change since start of the year", "Max")
+      for (ci in seq_along(hdrs)) {
+        writeData(wb, sn, hdrs[ci], startRow = 1, startCol = ci + 1)
+        addStyle(wb, sn, .hs(), rows = 1, cols = ci + 1, stack = TRUE)
+      }
+
+      # Row 2: Number (formulas)
+      writeData(wb, sn, "Number", startRow = 2, startCol = 1)
+      addStyle(wb, sn, .cmp_label(), rows = 2, cols = 1, stack = TRUE)
+      .wf(wb, sn, .fml_avg_last(cl, dsr), 2, 2)                                    # Current
+      .wf(wb, sn, sprintf("%s-%s", .fml_last(cl, dsr), .fml_last(cl, dsr, -1)), 2, 3) # Month change
+      .wf(wb, sn, .fml_change_avg(cl, dsr, -5), 2, 4)                               # Quarter change
+      .wf(wb, sn, .fml_change_avg(cl, dsr, -14), 2, 5)                              # YoY change
+      if (!is.na(covid_r)) .wf(wb, sn, .fml_change_fixed(cl, dsr, covid_r, covid_r + 2), 2, 6) # Covid
+      if (!is.na(elec_r)) .wf(wb, sn, .fml_change_fixed(cl, dsr, elec_r, elec_r + 2), 2, 7)   # 2024 election
+      if (!is.na(office_r)) .wf(wb, sn, .fml_change_single(cl, dsr, office_r), 2, 8)           # Coming into office
+      # Start of year: use XLOOKUP
+      .wf(wb, sn, sprintf('%s-_xlfn.XLOOKUP("January "&TEXT(TODAY(),"yyyy"),A$%d:A$1048576,B$%d:B$1048576)', .fml_last("B", dsr), dsr, dsr), 2, 9)
+      .wf(wb, sn, .fml_max(cl, dsr), 2, 10)                                          # Max
+
+      # Row 3: % (formulas)
+      writeData(wb, sn, "%", startRow = 3, startCol = 1)
+      addStyle(wb, sn, .cmp_label(), rows = 3, cols = 1, stack = TRUE)
+      .wf(wb, sn, sprintf("%s/%s-1", .fml_last(cl, dsr), .fml_last(cl, dsr, -1)), 3, 3) # Month %
+      .wf(wb, sn, .fml_pct_avg(cl, dsr, -5), 3, 4)                                      # Quarter %
+      .wf(wb, sn, .fml_pct_avg(cl, dsr, -14), 3, 5)                                     # YoY %
+      if (!is.na(covid_r)) .wf(wb, sn, sprintf("%s/AVERAGE(%s$%d:%s$%d)-1", .fml_last(cl, dsr), cl, covid_r, cl, covid_r + 2), 3, 6)
+      if (!is.na(elec_r)) .wf(wb, sn, .fml_pct_fixed(cl, dsr, elec_r, elec_r + 2), 3, 7)
+      if (!is.na(office_r)) .wf(wb, sn, sprintf("%s/%s$%d-1", .fml_last(cl, dsr), cl, office_r), 3, 8)
+      .wf(wb, sn, sprintf('%s/_xlfn.XLOOKUP("January "&TEXT(TODAY(),"yyyy"),A$%d:A$1048576,B$%d:B$1048576)-1', .fml_last("B", dsr), dsr, dsr), 3, 9)
+
+      addStyle(wb, sn, .num_fmt(), rows = 2, cols = 2:10, gridExpand = TRUE, stack = TRUE)
+      addStyle(wb, sn, .pct_fmt(), rows = 3, cols = 3:9, gridExpand = TRUE, stack = TRUE)
+      addStyle(wb, sn, .cmp_sep(), rows = 3, cols = 1:10, gridExpand = TRUE, stack = TRUE)
     }
   }
 
@@ -496,55 +619,56 @@ create_audit_workbook <- function(
       sn <- "23. Employees Industry"
       addWorksheet(wb, sn, tabColour = "#548235")
 
-      # Detect dates and get yearly changes
-      ind_dates <- .detect_dates(tbl_23[[1]])
-      ind_valid <- which(!is.na(ind_dates))
-      if (length(ind_valid) > 0) {
-        latest_date <- ind_dates[ind_valid[length(ind_valid)]]
-        yago_date   <- latest_date %m-% months(12)
-        latest_idx  <- ind_valid[length(ind_valid)]
-        yago_idx    <- which(ind_dates == yago_date)
-
-        # Header row 1: "Yearly change" + industry names
-        writeData(wb, sn, "Yearly change", startRow = 1, startCol = 1)
-        addStyle(wb, sn, .hs(), rows = 1, cols = 1, stack = TRUE)
-        if (ncol(tbl_23) > 1) {
-          # Try to find header row in original data
-          for (ci in 2:min(ncol(tbl_23), 20)) {
-            header_val <- as.character(tbl_23[[ci]][1])
-            if (!is.na(header_val) && nchar(header_val) > 0) {
-              writeData(wb, sn, header_val, startRow = 1, startCol = ci)
-              addStyle(wb, sn, .hs(), rows = 1, cols = ci, stack = TRUE)
-            }
-          }
-        }
-
-        # Row 2: Number (yearly change), Row 3: % change
-        if (length(yago_idx) > 0) {
-          writeData(wb, sn, "Number", startRow = 2, startCol = 1)
-          writeData(wb, sn, "%", startRow = 3, startCol = 1)
-          addStyle(wb, sn, .cmp_label(), rows = 2:3, cols = 1, gridExpand = TRUE, stack = TRUE)
-          for (ci in 2:min(ncol(tbl_23), 20)) {
-            cur_v <- suppressWarnings(as.numeric(as.character(tbl_23[[ci]][latest_idx])))
-            yr_v  <- suppressWarnings(as.numeric(as.character(tbl_23[[ci]][yago_idx[1]])))
-            if (!is.na(cur_v) && !is.na(yr_v)) {
-              writeData(wb, sn, cur_v - yr_v, startRow = 2, startCol = ci)
-              if (yr_v != 0) writeData(wb, sn, (cur_v - yr_v) / yr_v, startRow = 3, startCol = ci)
-            }
-          }
-          addStyle(wb, sn, .num_fmt(), rows = 2, cols = 2:min(ncol(tbl_23), 20),
-                   gridExpand = TRUE, stack = TRUE)
-          addStyle(wb, sn, .pct_fmt(), rows = 3, cols = 2:min(ncol(tbl_23), 20),
-                   gridExpand = TRUE, stack = TRUE)
-        }
-        addStyle(wb, sn, .cmp_sep(), rows = 3, cols = 1:min(ncol(tbl_23), 20),
-                 gridExpand = TRUE, stack = TRUE)
-      }
-
       # Write original data from row 5
       writeData(wb, sn, tbl_23, colNames = FALSE, startRow = 5)
       addStyle(wb, sn, .data_font(), rows = 5:(5 + nrow(tbl_23)),
                cols = 1:ncol(tbl_23), gridExpand = TRUE, stack = TRUE)
+
+      # Find data start row (first row with date values in col A)
+      ind_dates <- .detect_dates(tbl_23[[1]])
+      ind_valid <- which(!is.na(ind_dates))
+      max_ci <- min(ncol(tbl_23), 21)  # Up to col U (20 industries)
+
+      if (length(ind_valid) > 0) {
+        dsr <- ind_valid[1] + 4  # output row where data starts (offset by row 5 base)
+
+        # Header row 1: "Yearly change" + industry names from source
+        writeData(wb, sn, "Yearly change", startRow = 1, startCol = 1)
+        addStyle(wb, sn, .hs(), rows = 1, cols = 1, stack = TRUE)
+        # Find the header row in source data (usually right before data starts)
+        hdr_src <- ind_valid[1] - 1
+        for (ci in 2:max_ci) {
+          header_val <- as.character(tbl_23[[ci]][hdr_src])
+          if (!is.na(header_val) && nchar(header_val) > 0) {
+            writeData(wb, sn, header_val, startRow = 1, startCol = ci)
+            addStyle(wb, sn, .hs(), rows = 1, cols = ci, stack = TRUE)
+          }
+        }
+
+        # Row 2: Number (yearly change), Row 3: % change — using formulas
+        writeData(wb, sn, "Number", startRow = 2, startCol = 1)
+        writeData(wb, sn, "%", startRow = 3, startCol = 1)
+        writeData(wb, sn, "Rank", startRow = 4, startCol = 1)
+        addStyle(wb, sn, .cmp_label(), rows = 2:4, cols = 1, gridExpand = TRUE, stack = TRUE)
+
+        for (ci in 2:max_ci) {
+          cl <- .col_letter(ci)
+          # Number: last - year_ago (12 months offset)
+          .wf(wb, sn, .fml_idx_change(cl, dsr, 12), 2, ci)
+          # %: last / year_ago - 1
+          .wf(wb, sn, .fml_idx_pct(cl, dsr, 12), 3, ci)
+        }
+        # Row 4: Rank based on Number row values
+        last_cl <- .col_letter(max_ci)
+        for (ci in 2:max_ci) {
+          cl <- .col_letter(ci)
+          .wf(wb, sn, sprintf("RANK(%s2,$B$2:$%s$2)", cl, last_cl), 4, ci)
+        }
+
+        addStyle(wb, sn, .num_fmt(), rows = 2, cols = 2:max_ci, gridExpand = TRUE, stack = TRUE)
+        addStyle(wb, sn, .pct_fmt(), rows = 3, cols = 2:max_ci, gridExpand = TRUE, stack = TRUE)
+        addStyle(wb, sn, .cmp_sep(), rows = 4, cols = 1:max_ci, gridExpand = TRUE, stack = TRUE)
+      }
     }
   }
 
@@ -555,34 +679,46 @@ create_audit_workbook <- function(
       sn <- "2"
       addWorksheet(wb, sn, tabColour = "#2F5496")
 
-      # Section headers (rows 1-4)
-      writeData(wb, sn, "Aged 16 and over", startRow = 1, startCol = 2)
-      writeData(wb, sn, "Aged 16-64", startRow = 1, startCol = 10)
-      addStyle(wb, sn, .hs(), rows = 1, cols = c(2, 10), stack = TRUE)
+      # Extended column count: up to col 24 (16-17 age group) or whatever source has
+      s2_ncol <- min(ncol(tbl_2_full), 24)
 
-      for (ci_pair in list(c(2, "Employment"), c(4, "Unemployment"), c(6, "Activity"),
-                           c(8, "Inactivity"), c(10, "Employment"))) {
-        writeData(wb, sn, ci_pair[2], startRow = 2, startCol = as.integer(ci_pair[1]))
-        addStyle(wb, sn, .hs(), rows = 2, cols = as.integer(ci_pair[1]), stack = TRUE)
+      # Section headers (row 2 — row 1 left blank per reference)
+      writeData(wb, sn, "Aged 16 and over", startRow = 2, startCol = 2)
+      writeData(wb, sn, "Aged 16-64 ", startRow = 2, startCol = 10)
+      addStyle(wb, sn, .hs(), rows = 2, cols = c(2, 10), stack = TRUE)
+      if (s2_ncol >= 18) {
+        writeData(wb, sn, "Aged 16-17", startRow = 2, startCol = 18)
+        addStyle(wb, sn, .hs(), rows = 2, cols = 18, stack = TRUE)
       }
-      for (ci in c(2, 4, 6, 8, 10)) {
-        writeData(wb, sn, "level", startRow = 3, startCol = ci)
-        writeData(wb, sn, "rate (%)", startRow = 3, startCol = ci + 1)
-      }
-      addStyle(wb, sn, .hs(), rows = 3, cols = 2:11, gridExpand = TRUE, stack = TRUE)
 
-      # Comparison data rows 4-9
+      # Category headers (row 3)
+      cats_16plus <- list(c(2, "Employment"), c(4, "Unemployment"), c(6, "Activity"), c(8, "Inactivity"))
+      cats_1664   <- list(c(10, "Employment"), c(12, "Unemployment"), c(14, "Activity"))
+      cats_1617   <- list(c(18, "Employment"), c(20, "Unemployment"), c(22, "Activity"), c(24, "Inactivity"))
+      if (s2_ncol >= 16) {
+        cats_1664 <- c(cats_1664, list(c(16, "Inactivity")))
+      }
+      for (ci_pair in c(cats_16plus, cats_1664, if (s2_ncol >= 18) cats_1617 else list())) {
+        cc <- as.integer(ci_pair[1])
+        if (cc <= s2_ncol) {
+          writeData(wb, sn, ci_pair[2], startRow = 3, startCol = cc)
+          addStyle(wb, sn, .hs(), rows = 3, cols = cc, stack = TRUE)
+        }
+      }
+
+      # Level/rate subheaders (row 4)
+      for (ci in seq(2, s2_ncol, by = 2)) {
+        writeData(wb, sn, "level", startRow = 4, startCol = ci)
+        if (ci + 1 <= s2_ncol) writeData(wb, sn, "rate (%)", startRow = 4, startCol = ci + 1)
+      }
+      addStyle(wb, sn, .hs(), rows = 3:4, cols = 2:s2_ncol, gridExpand = TRUE, stack = TRUE)
+
+      # Comparison data rows 5-10
       cmp_labels <- c("Current", "Quarterly change", "Change year on year",
                        "Change since Covid (Dec 19-feb 20)",
                        "change since 2010 election", "change since 2024 election")
-      # Get values from tbl_2_full using .lfs_metric for ALL columns
-      # Columns: 2=emp16 level, 3=emp16 rate, 4=unemp level, 5=unemp rate,
-      #   6=activity level, 7=activity rate, 8=inactivity level, 9=inactivity rate,
-      #   10=emp16-64 level (if exists), 11=emp16-64 rate (if exists)
       lab_2010 <- "Feb-Apr 2010"
       all_labels_2 <- c(lab_cur, lab_q, lab_y, lab_covid, lab_2010, lab_elec)
-      # Extract values for each data column across all comparison periods
-      s2_ncol <- min(ncol(tbl_2_full), 11)
       cmp_vals <- lapply(1:6, function(cmp_idx) {
         vapply(2:s2_ncol, function(ci) {
           cur_row <- .find_row(tbl_2_full, all_labels_2[1])
@@ -594,7 +730,7 @@ create_audit_workbook <- function(
         }, numeric(1))
       })
       for (i in seq_along(cmp_labels)) {
-        r <- 3 + i
+        r <- 4 + i
         writeData(wb, sn, cmp_labels[i], startRow = r, startCol = 1)
         addStyle(wb, sn, .cmp_label(), rows = r, cols = 1, stack = TRUE)
         for (j in seq_along(cmp_vals[[i]])) {
@@ -603,7 +739,7 @@ create_audit_workbook <- function(
           }
         }
       }
-      addStyle(wb, sn, .cmp_sep(), rows = 9, cols = 1:11, gridExpand = TRUE, stack = TRUE)
+      addStyle(wb, sn, .cmp_sep(), rows = 10, cols = 1:s2_ncol, gridExpand = TRUE, stack = TRUE)
 
       # Write original data from row 11
       writeData(wb, sn, tbl_2_full, colNames = FALSE, startRow = 11)
@@ -620,59 +756,61 @@ create_audit_workbook <- function(
       sn <- "5"
       addWorksheet(wb, sn, tabColour = "#2F5496")
 
-      # Headers row 1
-      col_hdrs <- c("Workforce jobs", "Employee jobs", "Self-employment jobs",
-                     "HM Forces", "Government-supported trainees")
-      for (ci in seq_along(col_hdrs)) {
-        writeData(wb, sn, col_hdrs[ci], startRow = 1, startCol = ci + 1)
-        addStyle(wb, sn, .hs(), rows = 1, cols = ci + 1, stack = TRUE)
-      }
-
-      # Comparison rows — compute from data
-      cmp_labels_5 <- c("Current", "Quarterly change", "Max", "Jobs created since new gov")
-      for (i in seq_along(cmp_labels_5)) {
-        writeData(wb, sn, cmp_labels_5[i], startRow = i + 1, startCol = 1)
-        addStyle(wb, sn, .cmp_label(), rows = i + 1, cols = 1, stack = TRUE)
-      }
-      # Find last numeric data row (skip header/metadata rows)
-      s5_col1 <- trimws(as.character(tbl_5[[1]]))
-      s5_data_rows <- which(grepl("^(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\\s+\\d{2}", s5_col1, ignore.case = TRUE))
-      # Find "Jun 24" row for "new gov" baseline
-      s5_newgov_row <- grep("^Jun\\s+24", s5_col1, ignore.case = TRUE)
-
-      if (length(s5_data_rows) > 0) {
-        last_dr <- s5_data_rows[length(s5_data_rows)]
-        prev_q_dr <- if (length(s5_data_rows) >= 2) s5_data_rows[length(s5_data_rows) - 1] else NA
-        for (ci in 2:min(ncol(tbl_5), 6)) {
-          col_vals <- suppressWarnings(as.numeric(as.character(tbl_5[[ci]])))
-          cur_val <- col_vals[last_dr]
-          if (!is.na(cur_val)) {
-            writeData(wb, sn, cur_val, startRow = 2, startCol = ci)
-            # Quarterly change
-            if (!is.na(prev_q_dr)) {
-              prev_val <- col_vals[prev_q_dr]
-              if (!is.na(prev_val)) writeData(wb, sn, cur_val - prev_val, startRow = 3, startCol = ci)
-            }
-            # Max
-            max_val <- max(col_vals[s5_data_rows], na.rm = TRUE)
-            if (is.finite(max_val)) writeData(wb, sn, max_val, startRow = 4, startCol = ci)
-            # Since new gov (Jun 24)
-            if (length(s5_newgov_row) > 0) {
-              gov_val <- col_vals[s5_newgov_row[1]]
-              if (!is.na(gov_val)) writeData(wb, sn, cur_val - gov_val, startRow = 5, startCol = ci)
-            }
-          }
-        }
-        addStyle(wb, sn, .num_fmt(), rows = 2:5, cols = 2:6, gridExpand = TRUE, stack = TRUE)
-      }
-      addStyle(wb, sn, .cmp_sep(), rows = 5, cols = 1:6, gridExpand = TRUE, stack = TRUE)
-
-      # Write original data from row 7
+      # Write original data from row 7 first (need it for formula references)
       writeData(wb, sn, tbl_5, colNames = FALSE, startRow = 7)
       addStyle(wb, sn, .data_font(), rows = 7:(7 + nrow(tbl_5)),
                cols = 1:ncol(tbl_5), gridExpand = TRUE, stack = TRUE)
       setColWidths(wb, sn, cols = 1, widths = 16)
       setColWidths(wb, sn, cols = 2:6, widths = 18)
+
+      # Headers row 2 (row 1 blank per reference)
+      col_hdrs <- c("Workforce jobs", "Employee jobs", "Self-employment jobs",
+                     "HM Forces", "Government- supported trainees")
+      for (ci in seq_along(col_hdrs)) {
+        writeData(wb, sn, col_hdrs[ci], startRow = 2, startCol = ci + 1)
+        addStyle(wb, sn, .hs(), rows = 2, cols = ci + 1, stack = TRUE)
+      }
+
+      # Find data start row in source (first row with "Mon YY" pattern)
+      s5_col1 <- trimws(as.character(tbl_5[[1]]))
+      s5_data_rows <- which(grepl("^(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\\s+\\d{2}", s5_col1, ignore.case = TRUE))
+      s5_newgov_row <- grep("^Jun\\s+24", s5_col1, ignore.case = TRUE)
+
+      # Comparison rows 3-6
+      cmp_labels_5 <- c("Current", "Quarterly change", "Max", "Jobs created since new gov")
+      for (i in seq_along(cmp_labels_5)) {
+        writeData(wb, sn, cmp_labels_5[i], startRow = i + 2, startCol = 1)
+        addStyle(wb, sn, .cmp_label(), rows = i + 2, cols = 1, stack = TRUE)
+      }
+
+      if (length(s5_data_rows) > 0) {
+        dsr <- s5_data_rows[1] + 6  # output row (source starts at row 7)
+        last_dr <- s5_data_rows[length(s5_data_rows)]
+        prev_q_dr <- if (length(s5_data_rows) >= 2) s5_data_rows[length(s5_data_rows) - 1] else NA
+        newgov_output_r <- if (length(s5_newgov_row) > 0) s5_newgov_row[1] + 6 else NA
+
+        for (ci in 2:min(ncol(tbl_5), 6)) {
+          cl <- .col_letter(ci)
+          col_vals <- suppressWarnings(as.numeric(as.character(tbl_5[[ci]])))
+          cur_val <- col_vals[last_dr]
+          if (!is.na(cur_val)) {
+            writeData(wb, sn, cur_val, startRow = 3, startCol = ci)
+            if (!is.na(prev_q_dr)) {
+              prev_val <- col_vals[prev_q_dr]
+              if (!is.na(prev_val)) writeData(wb, sn, cur_val - prev_val, startRow = 4, startCol = ci)
+            }
+            # Max — use formula
+            .wf(wb, sn, sprintf("MAX(%s$%d:%s$1048576)", cl, dsr, cl), 5, ci)
+            # Since new gov
+            if (!is.na(newgov_output_r)) {
+              gov_val <- col_vals[s5_newgov_row[1]]
+              if (!is.na(gov_val)) writeData(wb, sn, cur_val - gov_val, startRow = 6, startCol = ci)
+            }
+          }
+        }
+        addStyle(wb, sn, .num_fmt(), rows = 3:6, cols = 2:6, gridExpand = TRUE, stack = TRUE)
+      }
+      addStyle(wb, sn, .cmp_sep(), rows = 6, cols = 1:6, gridExpand = TRUE, stack = TRUE)
     }
   }
 
@@ -733,61 +871,97 @@ create_audit_workbook <- function(
     if (nrow(tbl_11) > 0 && ncol(tbl_11) >= 6) {
       sn <- "11"
       addWorksheet(wb, sn, tabColour = "#2F5496")
+      max_col_11 <- min(ncol(tbl_11), 21)
 
-      # Headers
+      # Row 1: Group headers
       writeData(wb, sn, "Economic inactivity by reason (thousands)", startRow = 1, startCol = 3)
       addStyle(wb, sn, .hs(), rows = 1, cols = 3, stack = TRUE)
-      reason_hdrs <- c("Total economically inactive aged 16-64 (thousands)",
-                        "Student", "Looking after family / home", "Temp sick", "Long-term sick",
-                        "Discouraged workers", "Retired", "Other")
-      n_cols_11 <- min(length(reason_hdrs), ncol(tbl_11) - 1)
-      for (ci in seq_len(n_cols_11)) {
-        writeData(wb, sn, reason_hdrs[ci], startRow = 2, startCol = ci + 1)
-        addStyle(wb, sn, .hs(), rows = 2, cols = ci + 1, stack = TRUE)
+      if (max_col_11 >= 13) {
+        writeData(wb, sn, "Percentage of economically inactive (%)", startRow = 1, startCol = 13)
+        addStyle(wb, sn, .hs(), rows = 1, cols = 13, stack = TRUE)
       }
 
-      # Comparison rows: extract from source data for ALL columns
-      # Use LFS labels that include "Feb-Apr 2010" for 2010 election
-      all_labels_11 <- c(lab_cur, lab_q, lab_y, "Dec-Feb 2020", "Feb-Apr 2010")
+      # Row 2: Column sub-headers
+      reason_hdrs_11 <- c(
+        "Total economically inactive aged 16-64 (thousands)4",
+        "Student", "Looking after family / home", "Temp sick", "Long-term sick",
+        "Discouraged workers1", "Retired", "Other2",
+        "Does not want job (thousands)", "Wants a job (thousands)",
+        "Total economically inactive\naged 16-64",
+        "Student", "Looking after family / home", "Temp sick", "Long-term sick",
+        "Discouraged workers1", "Retired", "Other2",
+        "Does not want job (%age of economically inactive)",
+        "Wants a job (%age of economically inactive)"
+      )
+      for (ci in 2:max_col_11) {
+        if (ci - 1 <= length(reason_hdrs_11)) {
+          writeData(wb, sn, reason_hdrs_11[ci - 1], startRow = 2, startCol = ci)
+          addStyle(wb, sn, .hs(), rows = 2, cols = ci, stack = TRUE)
+        }
+      }
+
+      # Comparison row labels (rows 3-7)
       cmp_labels_11 <- c("Current", "Quarterly change", "year on year change",
                           "Since pandemic", "Since 2010 election")
       for (i in seq_along(cmp_labels_11)) {
-        r <- 2 + i
-        writeData(wb, sn, cmp_labels_11[i], startRow = r, startCol = 1)
-        addStyle(wb, sn, .cmp_label(), rows = r, cols = 1, stack = TRUE)
+        writeData(wb, sn, cmp_labels_11[i], startRow = 2 + i, startCol = 1)
+        addStyle(wb, sn, .cmp_label(), rows = 2 + i, cols = 1, stack = TRUE)
       }
 
-      # For each data column, compute comparisons
-      for (ci in 2:min(ncol(tbl_11), n_cols_11 + 1)) {
-        cur_row <- .find_row(tbl_11, lab_cur)
-        q_row   <- .find_row(tbl_11, lab_q)
-        y_row   <- .find_row(tbl_11, lab_y)
-        cov_row <- .find_row(tbl_11, "Dec-Feb 2020")
-        e10_row <- .find_row(tbl_11, "Feb-Apr 2010")
-        cur_v <- .cell_num(tbl_11, cur_row, ci)
-        if (!is.na(cur_v)) {
-          writeData(wb, sn, cur_v, startRow = 3, startCol = ci)
-          q_v <- .cell_num(tbl_11, q_row, ci)
-          if (!is.na(q_v)) writeData(wb, sn, cur_v - q_v, startRow = 4, startCol = ci)
-          y_v <- .cell_num(tbl_11, y_row, ci)
-          if (!is.na(y_v)) writeData(wb, sn, cur_v - y_v, startRow = 5, startCol = ci)
-          cov_v <- .cell_num(tbl_11, cov_row, ci)
-          if (!is.na(cov_v)) writeData(wb, sn, cur_v - cov_v, startRow = 6, startCol = ci)
-          e10_v <- .cell_num(tbl_11, e10_row, ci)
-          if (!is.na(e10_v)) writeData(wb, sn, cur_v - e10_v, startRow = 7, startCol = ci)
-        }
-      }
-      addStyle(wb, sn, .num_fmt(), rows = 3:7, cols = 2:min(ncol(tbl_11), n_cols_11 + 1),
-               gridExpand = TRUE, stack = TRUE)
-      addStyle(wb, sn, .cmp_sep(), rows = 7, cols = 1:min(ncol(tbl_11), n_cols_11 + 1),
-               gridExpand = TRUE, stack = TRUE)
-
-      # Original data from row 9
+      # Write source data at row 9
       writeData(wb, sn, tbl_11, colNames = FALSE, startRow = 9)
+
+      # Detect data start rows
+      off_11 <- 8
+      dsr_11_main <- .first_num_r(tbl_11, 2) + off_11  # Total (col B) and Inactive% (col L)
+      # Sub-category columns start data later (more header rows)
+      dsr_11_sub <- if (ncol(tbl_11) >= 3) .first_num_r(tbl_11, 3) + off_11 else dsr_11_main
+
+      # Find baseline rows
+      .fr11 <- function(label) {
+        idx <- .find_row(tbl_11, label)
+        if (!is.na(idx)) idx + off_11 else NA_integer_
+      }
+      pandemic_11 <- .fr11("Dec-Feb 2020")
+      elec2010_11 <- .fr11("Feb-Apr 2010")
+
+      # Write formulas for all columns
+      # Cols B(2) and L(12) use dsr_11_main; all others use dsr_11_sub for Current row
+      # But quarterly/YoY/baseline rows ALL use dsr_11_main ($18 in reference)
+      for (ci in 2:max_col_11) {
+        cl <- .col_letter(ci)
+        is_main_col <- (ci == 2 || ci == 12)  # Total and Inactive%
+        dsr_cur <- if (is_main_col) dsr_11_main else dsr_11_sub
+
+        # Row 3: Current
+        .wf(wb, sn, .fml_last(cl, dsr_cur), 3, ci)
+
+        # Row 4: Quarterly change (all use dsr_11_main, offset -3)
+        .wf(wb, sn, .fml_idx_change(cl, dsr_11_main, 3), 4, ci)
+
+        # Row 5: Year on year change (offset -12)
+        .wf(wb, sn, .fml_idx_change(cl, dsr_11_main, 12), 5, ci)
+
+        # Row 6: Since pandemic
+        if (!is.na(pandemic_11))
+          .wf(wb, sn, .fml_idx_change_fixed(cl, dsr_11_main, pandemic_11), 6, ci)
+
+        # Row 7: Since 2010 election
+        if (!is.na(elec2010_11))
+          .wf(wb, sn, .fml_idx_change_fixed(cl, dsr_11_main, elec2010_11), 7, ci)
+      }
+
+      # Formatting
+      addStyle(wb, sn, .num_fmt(), rows = 3:7, cols = 2:max_col_11,
+               gridExpand = TRUE, stack = TRUE)
+      addStyle(wb, sn, .cmp_sep(), rows = 7, cols = 1:max_col_11,
+               gridExpand = TRUE, stack = TRUE)
+
+      # Source data styling
       addStyle(wb, sn, .data_font(), rows = 9:(9 + nrow(tbl_11)),
                cols = 1:ncol(tbl_11), gridExpand = TRUE, stack = TRUE)
       setColWidths(wb, sn, cols = 1, widths = 16)
-      setColWidths(wb, sn, cols = 2:min(ncol(tbl_11), n_cols_11 + 1), widths = 20)
+      setColWidths(wb, sn, cols = 2:max_col_11, widths = 20)
     }
   }
 
@@ -796,66 +970,134 @@ create_audit_workbook <- function(
     sn <- "13"
     addWorksheet(wb, sn, tabColour = "#2F5496")
 
-    # Sector headers (rows 1-3 matching reference)
-    for (pair in list(c(2, "Whole Economy"), c(5, "Private sector"), c(8, "Public sector"),
-                      c(11, "Services, SIC 2007 sections G-S"))) {
-      writeData(wb, sn, pair[2], startRow = 1, startCol = as.integer(pair[1]))
-      addStyle(wb, sn, .hs(), rows = 1, cols = as.integer(pair[1]), stack = TRUE)
-    }
-    for (ci in c(2, 5, 8, 11)) {
-      writeData(wb, sn, "Weekly Earnings (\u00a3)", startRow = 2, startCol = ci)
-    }
-    for (ci in c(3, 6, 9)) {
-      writeData(wb, sn, "% changes year on year", startRow = 2, startCol = ci)
-    }
-    addStyle(wb, sn, .hs(), rows = 2, cols = 2:11, gridExpand = TRUE, stack = TRUE)
-    for (ci in c(3, 6, 9)) {
-      writeData(wb, sn, "Single month", startRow = 3, startCol = ci)
-      writeData(wb, sn, "3 month average", startRow = 3, startCol = ci + 1)
-    }
-    addStyle(wb, sn, .hs(), rows = 3, cols = 2:11, gridExpand = TRUE, stack = TRUE)
+    # 9 sector definitions matching reference workbook
+    awe_sectors <- list(
+      list(name = "Whole Economy", sc = 2),
+      list(name = "Private sector3 4 5", sc = 5),
+      list(name = "Public sector3 4 5", sc = 8),
+      list(name = "Services, SIC 2007 sections G-S", sc = 11),
+      list(name = "Finance and business services,\nSIC 2007 sections K-N", sc = 14),
+      list(name = "Public sector excluding financial services 4 5", sc = 17),
+      list(name = "Manufacturing, SIC 2007 section C", sc = 20),
+      list(name = "Construction, SIC 2007 section F", sc = 23),
+      list(name = "Wholesaling, retailing, hotels & restaurants, SIC 2007 sections G & I", sc = 26)
+    )
+    max_col_13 <- 28
 
-    # Comparison rows 4-8
+    # Row 1: Sector name headers
+    for (sec in awe_sectors) {
+      writeData(wb, sn, sec$name, startRow = 1, startCol = sec$sc)
+      addStyle(wb, sn, .hs(), rows = 1, cols = sec$sc, stack = TRUE)
+    }
+    # Row 2: Weekly Earnings / % changes sub-headers
+    for (sec in awe_sectors) {
+      writeData(wb, sn, "Weekly Earnings (\u00a3)", startRow = 2, startCol = sec$sc)
+      writeData(wb, sn, "% changes year on year", startRow = 2, startCol = sec$sc + 1)
+    }
+    addStyle(wb, sn, .hs(), rows = 2, cols = 2:max_col_13, gridExpand = TRUE, stack = TRUE)
+    # Row 3: Single month / 3 month average sub-headers
+    for (sec in awe_sectors) {
+      writeData(wb, sn, "Single month", startRow = 3, startCol = sec$sc + 1)
+      writeData(wb, sn, "3 month average 2", startRow = 3, startCol = sec$sc + 2)
+    }
+    addStyle(wb, sn, .hs(), rows = 3, cols = 2:max_col_13, gridExpand = TRUE, stack = TRUE)
+
+    # Comparison row labels (rows 4-8)
     cmp_labels_13 <- c("Current (3mo avg)", "Change on quarter", "Change year on year",
                         "Change since Covid-19", "Change since 2024 election")
     for (i in seq_along(cmp_labels_13)) {
-      r <- 3 + i
-      writeData(wb, sn, cmp_labels_13[i], startRow = r, startCol = 1)
-      addStyle(wb, sn, .cmp_label(), rows = r, cols = 1, stack = TRUE)
+      writeData(wb, sn, cmp_labels_13[i], startRow = 3 + i, startCol = 1)
+      addStyle(wb, sn, .cmp_label(), rows = 3 + i, cols = 1, stack = TRUE)
     }
-    # Fill in whole economy values (col B=weekly £, col D=3mo avg %)
-    if (exists("w13_dates") && exists("w13_weekly") && exists("w13_pct")) {
-      cur_weekly <- .val_by_date(w13_dates, w13_weekly, anchor_m)
-      cur_pct    <- .val_by_date(w13_dates, w13_pct, anchor_m)
-      if (!is.na(cur_weekly)) writeData(wb, sn, cur_weekly, startRow = 4, startCol = 2)
-      if (!is.na(cur_pct))    writeData(wb, sn, cur_pct / 100, startRow = 4, startCol = 4)
-      if (!is.na(wages_m$dq)) writeData(wb, sn, wages_m$dq, startRow = 5, startCol = 2)
-      if (!is.na(wages_m$dy)) writeData(wb, sn, wages_m$dy, startRow = 6, startCol = 2)
-      if (!is.na(wages_m$dc)) writeData(wb, sn, wages_m$dc, startRow = 7, startCol = 2)
-      if (!is.na(wages_m$de)) writeData(wb, sn, wages_m$de, startRow = 8, startCol = 2)
-    }
-    addStyle(wb, sn, .gbp_fmt(), rows = 5:8, cols = 2, gridExpand = TRUE, stack = TRUE)
-    addStyle(wb, sn, .pct_fmt(), rows = 4, cols = c(4, 7, 10), gridExpand = TRUE, stack = TRUE)
-    addStyle(wb, sn, .cmp_sep(), rows = 8, cols = 1:11, gridExpand = TRUE, stack = TRUE)
 
-    # Write original data from row 9 with fixed dates
+    # Write source data at row 9
     tbl_13[[1]] <- .detect_dates(tbl_13[[1]])
     writeData(wb, sn, tbl_13, colNames = FALSE, startRow = 9)
-    # Apply date format to col A
-    date_rows_13 <- which(!is.na(tbl_13[[1]])) + 8
-    if (length(date_rows_13) > 0) {
-      addStyle(wb, sn, .date_fmt(), rows = date_rows_13, cols = 1, stack = TRUE)
+
+    # Detect data start rows for each column type
+    .first_num_r <- function(tbl, col) {
+      vals <- suppressWarnings(as.numeric(as.character(tbl[[col]])))
+      idx <- which(!is.na(vals))
+      if (length(idx) == 0) NA_integer_ else idx[1]
     }
+    off_13 <- 8  # startRow(9) - 1
+    dsr_w <- .first_num_r(tbl_13, 2) + off_13  # weekly £ data start row
+    dsr_s <- .first_num_r(tbl_13, 3) + off_13  # single month % data start row
+    dsr_3 <- .first_num_r(tbl_13, 4) + off_13  # 3mo avg % data start row
+
+    # Find baseline rows dynamically from dates
+    dates_13 <- .detect_dates(tbl_13[[1]])
+    .dr13 <- function(d) {
+      idx <- which(dates_13 == as.Date(d))
+      if (length(idx)) idx[1] + off_13 else NA_integer_
+    }
+    covid_r1 <- .dr13("2019-12-01"); covid_r3 <- .dr13("2020-02-01")
+    elec_r1  <- .dr13("2024-04-01"); elec_r3  <- .dr13("2024-06-01")
+
+    # Whole Economy baseline column letters (all sectors use these for fixed baselines)
+    we_w <- .col_letter(2); we_s <- .col_letter(3); we_3 <- .col_letter(4)
+
+    # Write formulas for all 9 sectors
+    for (sec in awe_sectors) {
+      cw <- .col_letter(sec$sc)      # weekly £ col letter
+      cs <- .col_letter(sec$sc + 1)  # single month % col letter
+      c3 <- .col_letter(sec$sc + 2)  # 3mo avg % col letter
+
+      # Row 4: Current — 3mo avg for weekly, last value for %
+      .wf(wb, sn, .fml_avg_last(cw, dsr_w), 4, sec$sc)
+      .wf(wb, sn, .fml_last(cs, dsr_s), 4, sec$sc + 1)
+      .wf(wb, sn, .fml_last(c3, dsr_3), 4, sec$sc + 2)
+
+      # Row 5: Change on quarter — weekly (avg3-avg3_offset)*52, % = last-last_3ago
+      .wf(wb, sn, sprintf("(%s)*52", .fml_change_avg(cw, dsr_w, -5)), 5, sec$sc)
+      .wf(wb, sn, .fml_idx_change(cs, dsr_s, 3), 5, sec$sc + 1)
+      .wf(wb, sn, .fml_idx_change(c3, dsr_3, 3), 5, sec$sc + 2)
+
+      # Row 6: Change year on year — weekly (avg3-avg3_offset-14)*52, % = last-last_12ago
+      .wf(wb, sn, sprintf("(%s)*52", .fml_change_avg(cw, dsr_w, -14)), 6, sec$sc)
+      .wf(wb, sn, .fml_idx_change(cs, dsr_s, 12), 6, sec$sc + 1)
+      .wf(wb, sn, .fml_idx_change(c3, dsr_3, 12), 6, sec$sc + 2)
+
+      # Row 7: Change since Covid-19 (all sectors use WE cols $B/$C/$D for baseline)
+      if (!is.na(covid_r1) && !is.na(covid_r3)) {
+        .wf(wb, sn, sprintf("(%s-AVERAGE($%s$%d:$%s$%d))*52",
+                             .fml_avg_last(cw, dsr_w), we_w, covid_r1, we_w, covid_r3), 7, sec$sc)
+        .wf(wb, sn, sprintf("%s-AVERAGE($%s$%d:$%s$%d)",
+                             .fml_last(cs, dsr_s), we_s, covid_r1, we_s, covid_r3), 7, sec$sc + 1)
+        .wf(wb, sn, sprintf("%s-AVERAGE($%s$%d:$%s$%d)",
+                             .fml_last(c3, dsr_3), we_3, covid_r1, we_3, covid_r3), 7, sec$sc + 2)
+      }
+
+      # Row 8: Change since 2024 election (all sectors use WE cols $B/$C/$D)
+      if (!is.na(elec_r1) && !is.na(elec_r3)) {
+        .wf(wb, sn, sprintf("(%s-AVERAGE($%s$%d:$%s$%d))*52",
+                             .fml_avg_last(cw, dsr_w), we_w, elec_r1, we_w, elec_r3), 8, sec$sc)
+        .wf(wb, sn, sprintf("%s-AVERAGE($%s$%d:$%s$%d)",
+                             .fml_last(cs, dsr_s), we_s, elec_r1, we_s, elec_r3), 8, sec$sc + 1)
+        .wf(wb, sn, sprintf("%s-AVERAGE($%s$%d:$%s$%d)",
+                             .fml_last(c3, dsr_3), we_3, elec_r1, we_3, elec_r3), 8, sec$sc + 2)
+      }
+    }
+
+    # Formatting
+    w_cols_13 <- sapply(awe_sectors, function(s) s$sc)
+    p_cols_13 <- unlist(lapply(awe_sectors, function(s) c(s$sc + 1, s$sc + 2)))
+    addStyle(wb, sn, .gbp_fmt(), rows = 4:8, cols = w_cols_13, gridExpand = TRUE, stack = TRUE)
+    addStyle(wb, sn, .pp_fmt(), rows = 4:8, cols = p_cols_13, gridExpand = TRUE, stack = TRUE)
+    addStyle(wb, sn, .cmp_sep(), rows = 8, cols = 1:max_col_13, gridExpand = TRUE, stack = TRUE)
+
+    # Source data styling
+    date_rows_13 <- which(!is.na(tbl_13[[1]])) + 8
+    if (length(date_rows_13) > 0)
+      addStyle(wb, sn, .date_fmt(), rows = date_rows_13, cols = 1, stack = TRUE)
     addStyle(wb, sn, .data_font(), rows = 9:(9 + nrow(tbl_13)),
              cols = 1:ncol(tbl_13), gridExpand = TRUE, stack = TRUE)
-    # Style identifier code row
     id_row_13 <- which(grepl("KAB9|KAC", as.character(tbl_13[[2]]))) + 8
-    if (length(id_row_13) > 0) {
+    if (length(id_row_13) > 0)
       addStyle(wb, sn, .id_code(), rows = id_row_13, cols = 1:ncol(tbl_13),
                gridExpand = TRUE, stack = TRUE)
-    }
     setColWidths(wb, sn, cols = 1, widths = 14)
-    setColWidths(wb, sn, cols = 2:min(ncol(tbl_13), 11), widths = 16)
+    setColWidths(wb, sn, cols = 2:max_col_13, widths = 16)
   }
 
   # --- A01 Sheet "15": AWE Regular Pay (nominal) with comparisons ---
@@ -865,75 +1107,119 @@ create_audit_workbook <- function(
       sn <- "15"
       addWorksheet(wb, sn, tabColour = "#2F5496")
 
-      # Sector headers
-      for (pair in list(c(2, "Whole Economy"), c(5, "Private sector"),
-                        c(8, "Public sector"), c(11, "Services, SIC 2007 sections G-S"))) {
-        writeData(wb, sn, pair[2], startRow = 1, startCol = as.integer(pair[1]))
-        addStyle(wb, sn, .hs(), rows = 1, cols = as.integer(pair[1]), stack = TRUE)
-      }
-      for (ci in c(2, 5, 8, 11)) {
-        writeData(wb, sn, "Weekly Earnings (\u00a3)", startRow = 2, startCol = ci)
-      }
-      for (ci in c(3, 6, 9)) {
-        writeData(wb, sn, "% changes year on year", startRow = 2, startCol = ci)
-      }
-      addStyle(wb, sn, .hs(), rows = 2, cols = 2:11, gridExpand = TRUE, stack = TRUE)
-      for (ci in c(3, 6, 9)) {
-        writeData(wb, sn, "Single month", startRow = 3, startCol = ci)
-        writeData(wb, sn, "3 month average", startRow = 3, startCol = ci + 1)
-      }
-      addStyle(wb, sn, .hs(), rows = 3, cols = 2:11, gridExpand = TRUE, stack = TRUE)
+      # 9 sector definitions matching reference
+      awe_sectors_15 <- list(
+        list(name = "Whole Economy", sc = 2),
+        list(name = "Private sector 3 4 5", sc = 5),
+        list(name = "Public sector 3 4 5", sc = 8),
+        list(name = "Services, SIC 2007 sections G-S", sc = 11),
+        list(name = "Finance and business services,\nSIC 2007 sections K-N", sc = 14),
+        list(name = "Public sector excluding financial services 4 5\n", sc = 17),
+        list(name = "Manufacturing, SIC 2007 section C", sc = 20),
+        list(name = "Construction, SIC 2007 section F", sc = 23),
+        list(name = "Wholesaling, retailing, hotels & restaurants, SIC 2007 sections G & I", sc = 26)
+      )
+      max_col_15 <- 28
 
-      # Comparison rows
+      # Row 1: Sector headers
+      for (sec in awe_sectors_15) {
+        writeData(wb, sn, sec$name, startRow = 1, startCol = sec$sc)
+        addStyle(wb, sn, .hs(), rows = 1, cols = sec$sc, stack = TRUE)
+      }
+      # Row 2: Sub-headers
+      for (sec in awe_sectors_15) {
+        writeData(wb, sn, "Weekly Earnings (\u00a3)", startRow = 2, startCol = sec$sc)
+        writeData(wb, sn, "% changes year on year", startRow = 2, startCol = sec$sc + 1)
+      }
+      addStyle(wb, sn, .hs(), rows = 2, cols = 2:max_col_15, gridExpand = TRUE, stack = TRUE)
+      # Row 3: Single month / 3 month average
+      for (sec in awe_sectors_15) {
+        writeData(wb, sn, "Single month", startRow = 3, startCol = sec$sc + 1)
+        writeData(wb, sn, "3 month average 2", startRow = 3, startCol = sec$sc + 2)
+      }
+      addStyle(wb, sn, .hs(), rows = 3, cols = 2:max_col_15, gridExpand = TRUE, stack = TRUE)
+
+      # Comparison row labels (rows 4-8)
       cmp_labels_15 <- c("Current", "Quarterly change", "year on year change",
                           "Since pandemic", "Since 2010 election")
-      w15_dates_full <- .detect_dates(tbl_15_full[[1]])
-      w15_weekly_full <- suppressWarnings(as.numeric(gsub("[^0-9.-]", "", as.character(tbl_15_full[[2]]))))
-      w15_pct_full <- suppressWarnings(as.numeric(gsub("[^0-9.-]", "", as.character(tbl_15_full[[4]]))))
-
-      cur_reg_weekly <- .val_by_date(w15_dates_full, w15_weekly_full, anchor_m)
-      cur_reg_pct    <- .val_by_date(w15_dates_full, w15_pct_full, anchor_m)
-
-      .reg_wc <- function(a, b) {
-        va <- .avg_by_dates(w15_dates_full, w15_weekly_full, a)
-        vb <- .avg_by_dates(w15_dates_full, w15_weekly_full, b)
-        if (is.na(va) || is.na(vb)) NA else va - vb
-      }
-      win3_15 <- c(anchor_m, anchor_m %m-% months(1), anchor_m %m-% months(2))
-      reg_dq <- .reg_wc(win3_15, c(anchor_m %m-% months(3), anchor_m %m-% months(4), anchor_m %m-% months(5)))
-      reg_dy <- .reg_wc(win3_15, win3_15 %m-% months(12))
-      reg_dc <- .reg_wc(win3_15, as.Date(c("2019-12-01", "2020-01-01", "2020-02-01")))
-
       for (i in seq_along(cmp_labels_15)) {
-        r <- 3 + i
-        writeData(wb, sn, cmp_labels_15[i], startRow = r, startCol = 1)
-        addStyle(wb, sn, .cmp_label(), rows = r, cols = 1, stack = TRUE)
+        writeData(wb, sn, cmp_labels_15[i], startRow = 3 + i, startCol = 1)
+        addStyle(wb, sn, .cmp_label(), rows = 3 + i, cols = 1, stack = TRUE)
       }
-      if (!is.na(cur_reg_weekly)) writeData(wb, sn, cur_reg_weekly, startRow = 4, startCol = 2)
-      if (!is.na(cur_reg_pct)) writeData(wb, sn, cur_reg_pct / 100, startRow = 4, startCol = 4)
-      if (!is.na(reg_dq)) writeData(wb, sn, reg_dq, startRow = 5, startCol = 2)
-      if (!is.na(reg_dy)) writeData(wb, sn, reg_dy, startRow = 6, startCol = 2)
-      if (!is.na(reg_dc)) writeData(wb, sn, reg_dc, startRow = 7, startCol = 2)
 
-      addStyle(wb, sn, .pct_fmt(), rows = 4, cols = c(4, 7, 10), gridExpand = TRUE, stack = TRUE)
-      addStyle(wb, sn, .cmp_sep(), rows = 8, cols = 1:11, gridExpand = TRUE, stack = TRUE)
-
-      # Write original data from row 9 with fixed dates
+      # Write source data at row 9
       tbl_15_full[[1]] <- .detect_dates(tbl_15_full[[1]])
       writeData(wb, sn, tbl_15_full, colNames = FALSE, startRow = 9)
-      date_rows_15 <- which(!is.na(tbl_15_full[[1]])) + 8
-      if (length(date_rows_15) > 0) {
-        addStyle(wb, sn, .date_fmt(), rows = date_rows_15, cols = 1, stack = TRUE)
+
+      # Detect data start rows
+      off_15 <- 8
+      dsr_15_w <- .first_num_r(tbl_15_full, 2) + off_15  # weekly £
+      dsr_15_s <- .first_num_r(tbl_15_full, 3) + off_15  # single month %
+      dsr_15_3 <- .first_num_r(tbl_15_full, 4) + off_15  # 3mo avg %
+
+      # Find baseline rows: pandemic = Mar 2020, 2010 election = May 2010
+      dates_15 <- .detect_dates(tbl_15_full[[1]])
+      .dr15 <- function(d) {
+        idx <- which(dates_15 == as.Date(d))
+        if (length(idx)) idx[1] + off_15 else NA_integer_
       }
+      pandemic_r <- .dr15("2020-03-01")
+      elec2010_r <- .dr15("2010-05-01")
+
+      # Write formulas for all 9 sectors
+      for (sec in awe_sectors_15) {
+        cw <- .col_letter(sec$sc)
+        cs <- .col_letter(sec$sc + 1)
+        c3 <- .col_letter(sec$sc + 2)
+
+        # Row 4: Current — last single value for ALL column types (not 3mo avg)
+        .wf(wb, sn, .fml_last(cw, dsr_15_w), 4, sec$sc)
+        .wf(wb, sn, .fml_last(cs, dsr_15_s), 4, sec$sc + 1)
+        .wf(wb, sn, .fml_last(c3, dsr_15_3), 4, sec$sc + 2)
+
+        # Row 5: Quarterly change — last - last_3ago (no *52)
+        .wf(wb, sn, .fml_idx_change(cw, dsr_15_w, 3), 5, sec$sc)
+        .wf(wb, sn, .fml_idx_change(cs, dsr_15_s, 3), 5, sec$sc + 1)
+        .wf(wb, sn, .fml_idx_change(c3, dsr_15_3, 3), 5, sec$sc + 2)
+
+        # Row 6: Year on year change — last - last_12ago
+        .wf(wb, sn, .fml_idx_change(cw, dsr_15_w, 12), 6, sec$sc)
+        .wf(wb, sn, .fml_idx_change(cs, dsr_15_s, 12), 6, sec$sc + 1)
+        .wf(wb, sn, .fml_idx_change(c3, dsr_15_3, 12), 6, sec$sc + 2)
+
+        # Row 7: Since pandemic — last - fixed_row (each sector uses own col)
+        # Note: 3mo avg % col uses dsr_15_s (not dsr_15_3) for baseline rows, matching ref
+        if (!is.na(pandemic_r)) {
+          .wf(wb, sn, .fml_idx_change_fixed(cw, dsr_15_w, pandemic_r), 7, sec$sc)
+          .wf(wb, sn, .fml_idx_change_fixed(cs, dsr_15_s, pandemic_r), 7, sec$sc + 1)
+          .wf(wb, sn, sprintf("%s-%s$%d", .fml_last(c3, dsr_15_s), c3, pandemic_r), 7, sec$sc + 2)
+        }
+
+        # Row 8: Since 2010 election — last - fixed_row (each sector uses own col)
+        if (!is.na(elec2010_r)) {
+          .wf(wb, sn, .fml_idx_change_fixed(cw, dsr_15_w, elec2010_r), 8, sec$sc)
+          .wf(wb, sn, .fml_idx_change_fixed(cs, dsr_15_s, elec2010_r), 8, sec$sc + 1)
+          .wf(wb, sn, sprintf("%s-%s$%d", .fml_last(c3, dsr_15_s), c3, elec2010_r), 8, sec$sc + 2)
+        }
+      }
+
+      # Formatting
+      p_cols_15 <- unlist(lapply(awe_sectors_15, function(s) c(s$sc + 1, s$sc + 2)))
+      addStyle(wb, sn, .pp_fmt(), rows = 4:8, cols = p_cols_15, gridExpand = TRUE, stack = TRUE)
+      addStyle(wb, sn, .cmp_sep(), rows = 8, cols = 1:max_col_15, gridExpand = TRUE, stack = TRUE)
+
+      # Source data styling
+      date_rows_15 <- which(!is.na(tbl_15_full[[1]])) + 8
+      if (length(date_rows_15) > 0)
+        addStyle(wb, sn, .date_fmt(), rows = date_rows_15, cols = 1, stack = TRUE)
       addStyle(wb, sn, .data_font(), rows = 9:(9 + nrow(tbl_15_full)),
                cols = 1:ncol(tbl_15_full), gridExpand = TRUE, stack = TRUE)
       id_row_15 <- which(grepl("KAJ", as.character(tbl_15_full[[2]]))) + 8
-      if (length(id_row_15) > 0) {
+      if (length(id_row_15) > 0)
         addStyle(wb, sn, .id_code(), rows = id_row_15, cols = 1:ncol(tbl_15_full),
                  gridExpand = TRUE, stack = TRUE)
-      }
       setColWidths(wb, sn, cols = 1, widths = 14)
-      setColWidths(wb, sn, cols = 2:min(ncol(tbl_15_full), 11), widths = 16)
+      setColWidths(wb, sn, cols = 2:max_col_15, widths = 16)
     }
   }
 
@@ -944,16 +1230,17 @@ create_audit_workbook <- function(
       sn <- "18"
       addWorksheet(wb, sn, tabColour = "#2F5496")
 
-      # Headers
-      col_hdrs_18 <- c("Working days lost (thousands)", "Number of stoppages",
-                        "Workers involved (thousands)")
+      # Headers matching reference
+      col_hdrs_18 <- c("Working days lost (thousands) ",
+                        "Number of stoppages 1,2",
+                        "Workers involved (thousands) 3")
       for (ci in seq_along(col_hdrs_18)) {
         writeData(wb, sn, col_hdrs_18[ci], startRow = 1, startCol = ci + 1)
         addStyle(wb, sn, .hs(), rows = 1, cols = ci + 1, stack = TRUE)
       }
 
-      # Comparison rows — 7 rows matching reference
-      cmp_labels_18 <- c("Current (singular month)", "Change on quarter (3mo avg)",
+      # Comparison row labels (rows 2-7)
+      cmp_labels_18 <- c("Current  (singular month)", "Change on quarter  (3mo avg)",
                           "Change since Covid-19 (2019 average)",
                           "Change since 2024 election (3mo avg)",
                           "2019 average", "2023 average")
@@ -962,49 +1249,76 @@ create_audit_workbook <- function(
         addStyle(wb, sn, .cmp_label(), rows = i + 1, cols = 1, stack = TRUE)
       }
 
-      # Compute values from Sheet 18 data (monthly date labels in col 1)
+      # Write source data at row 9
+      writeData(wb, sn, tbl_18, colNames = FALSE, startRow = 9)
+
+      # Detect data start row (first numeric value in col 2)
+      off_18 <- 8
+      dsr_18 <- .first_num_r(tbl_18, 2) + off_18
+
+      # Find baseline rows dynamically from dates
       s18_dates <- .detect_dates(tbl_18[[1]])
-      s18_valid <- which(!is.na(s18_dates))
-      if (length(s18_valid) >= 3) {
-        for (ci in 2:min(ncol(tbl_18), 4)) {
-          s18_vals <- suppressWarnings(as.numeric(as.character(tbl_18[[ci]])))
-          # Current (latest single month)
-          cur_18 <- s18_vals[s18_valid[length(s18_valid)]]
-          if (!is.na(cur_18)) writeData(wb, sn, cur_18, startRow = 2, startCol = ci)
-          # 3mo avg change (last 3 vs prior 3)
-          if (length(s18_valid) >= 6) {
-            last3  <- mean(s18_vals[s18_valid[(length(s18_valid)-2):length(s18_valid)]], na.rm = TRUE)
-            prev3  <- mean(s18_vals[s18_valid[(length(s18_valid)-5):(length(s18_valid)-3)]], na.rm = TRUE)
-            if (!is.na(last3) && !is.na(prev3)) writeData(wb, sn, last3 - prev3, startRow = 3, startCol = ci)
-          }
-          # 2019 average
-          yr2019 <- which(format(s18_dates, "%Y") == "2019" & !is.na(s18_vals))
-          avg2019 <- if (length(yr2019) > 0) mean(s18_vals[yr2019], na.rm = TRUE) else NA
-          if (!is.na(avg2019)) writeData(wb, sn, avg2019, startRow = 6, startCol = ci)
-          # 2023 average
-          yr2023 <- which(format(s18_dates, "%Y") == "2023" & !is.na(s18_vals))
-          avg2023 <- if (length(yr2023) > 0) mean(s18_vals[yr2023], na.rm = TRUE) else NA
-          if (!is.na(avg2023)) writeData(wb, sn, avg2023, startRow = 7, startCol = ci)
-          # Change since Covid-19 (current vs 2019 avg)
-          if (!is.na(cur_18) && !is.na(avg2019)) writeData(wb, sn, cur_18 - avg2019, startRow = 4, startCol = ci)
-          # Change since 2024 election (last 3mo avg vs Jul-Sep 2024 avg)
-          elec_months <- as.Date(c("2024-07-01", "2024-08-01", "2024-09-01"))
-          elec_vals <- vapply(elec_months, function(d) {
-            idx <- which(s18_dates == d)
-            if (length(idx) > 0) s18_vals[idx[1]] else NA_real_
-          }, numeric(1))
-          avg_elec <- if (all(!is.na(elec_vals))) mean(elec_vals) else NA
-          if (!is.na(avg_elec) && length(s18_valid) >= 3) {
-            last3_val <- mean(s18_vals[s18_valid[(length(s18_valid)-2):length(s18_valid)]], na.rm = TRUE)
-            if (!is.na(last3_val)) writeData(wb, sn, last3_val - avg_elec, startRow = 5, startCol = ci)
+      .dr18 <- function(d) {
+        idx <- which(s18_dates == as.Date(d))
+        if (length(idx)) idx[1] + off_18 else NA_integer_
+      }
+      # 2019 data: Jan-Dec 2019 (12 months)
+      r2019_start <- .dr18("2019-01-01"); r2019_end <- .dr18("2019-12-01")
+      # 2023 data: Jan-Dec 2023 (12 months)
+      r2023_start <- .dr18("2023-01-01"); r2023_end <- .dr18("2023-12-01")
+      # Election baseline: Apr-Jun 2024 (3 months)
+      elec18_r1 <- .dr18("2024-04-01"); elec18_r3 <- .dr18("2024-06-01")
+
+      # Write formulas for cols B(2), C(3), D(4)
+      for (ci in 2:4) {
+        cl <- .col_letter(ci)
+        is_days <- (ci == 2)  # col B (working days lost) uses *52 multiplier
+
+        # Row 2: Current (singular month) — last value
+        .wf(wb, sn, .fml_last(cl, dsr_18), 2, ci)
+
+        # Row 3: Change on quarter (3mo avg) — col B *52, others plain
+        if (is_days) {
+          .wf(wb, sn, sprintf("(%s)*52", .fml_change_avg(cl, dsr_18, -5)), 3, ci)
+        } else {
+          .wf(wb, sn, .fml_change_avg(cl, dsr_18, -5), 3, ci)
+        }
+
+        # Row 4: Change since Covid-19 (2019 average)
+        if (!is.na(r2019_start) && !is.na(r2019_end)) {
+          if (is_days) {
+            .wf(wb, sn, sprintf("(%s-AVERAGE(%s$%d:%s$%d))*52",
+                                 .fml_avg_last(cl, dsr_18), cl, r2019_start, cl, r2019_end), 4, ci)
+          } else {
+            .wf(wb, sn, sprintf("%s-AVERAGE(%s$%d:%s$%d)",
+                                 .fml_avg_last(cl, dsr_18), cl, r2019_start, cl, r2019_end), 4, ci)
           }
         }
-        addStyle(wb, sn, .num_fmt(), rows = 2:7, cols = 2:4, gridExpand = TRUE, stack = TRUE)
+
+        # Row 5: Change since 2024 election (3mo avg)
+        if (!is.na(elec18_r1) && !is.na(elec18_r3)) {
+          if (is_days) {
+            .wf(wb, sn, sprintf("(%s-AVERAGE(%s$%d:%s$%d))*52",
+                                 .fml_avg_last(cl, dsr_18), cl, elec18_r1, cl, elec18_r3), 5, ci)
+          } else {
+            .wf(wb, sn, sprintf("%s-AVERAGE(%s$%d:%s$%d)",
+                                 .fml_avg_last(cl, dsr_18), cl, elec18_r1, cl, elec18_r3), 5, ci)
+          }
+        }
+
+        # Row 6: 2019 average
+        if (!is.na(r2019_start) && !is.na(r2019_end))
+          .wf(wb, sn, .fml_avg_range(cl, r2019_start, r2019_end), 6, ci)
+
+        # Row 7: 2023 average
+        if (!is.na(r2023_start) && !is.na(r2023_end))
+          .wf(wb, sn, .fml_avg_range(cl, r2023_start, r2023_end), 7, ci)
       }
+
+      addStyle(wb, sn, .num_fmt(), rows = 2:7, cols = 2:4, gridExpand = TRUE, stack = TRUE)
       addStyle(wb, sn, .cmp_sep(), rows = 7, cols = 1:4, gridExpand = TRUE, stack = TRUE)
 
-      # Write original data from row 9
-      writeData(wb, sn, tbl_18, colNames = FALSE, startRow = 9)
+      # Source data styling
       addStyle(wb, sn, .data_font(), rows = 9:(9 + nrow(tbl_18)),
                cols = 1:ncol(tbl_18), gridExpand = TRUE, stack = TRUE)
       setColWidths(wb, sn, cols = 1, widths = 40)
@@ -1019,40 +1333,136 @@ create_audit_workbook <- function(
       sn <- "20"
       addWorksheet(wb, sn, tabColour = "#2F5496")
 
-      # Headers
-      col_hdrs_20 <- c("All Vacancies (thousands)", "Unemployment (thousands)",
+      # Left-side headers (cols 2-4) — absolute values
+      col_hdrs_20 <- c("All Vacancies1 (thousands)", "Unemployment2 (thousands)",
                         "Number of unemployed people per vacancy")
       for (ci in seq_along(col_hdrs_20)) {
         writeData(wb, sn, col_hdrs_20[ci], startRow = 1, startCol = ci + 1)
         addStyle(wb, sn, .hs(), rows = 1, cols = ci + 1, stack = TRUE)
       }
-
-      # Comparison rows
-      cmp_labels_20 <- c("Current", "Quarterly change", "Year on year change",
-                          "Pre-pandemic trend (Jan-Mar)", "Since 2024 election")
-      for (i in seq_along(cmp_labels_20)) {
-        r <- i + 1
-        writeData(wb, sn, cmp_labels_20[i], startRow = r, startCol = 1)
-        addStyle(wb, sn, .cmp_label(), rows = r, cols = 1, stack = TRUE)
-        if (i == 1 && !is.na(vac_m$cur)) writeData(wb, sn, vac_m$cur, startRow = r, startCol = 2)
-        if (i == 2 && !is.na(vac_m$dq))  writeData(wb, sn, vac_m$dq, startRow = r, startCol = 2)
-        if (i == 3 && !is.na(vac_m$dy))  writeData(wb, sn, vac_m$dy, startRow = r, startCol = 2)
-        if (i == 4 && !is.na(vac_m$dc))  writeData(wb, sn, vac_m$dc, startRow = r, startCol = 2)
-        if (i == 5 && !is.na(vac_m$de))  writeData(wb, sn, vac_m$de, startRow = r, startCol = 2)
+      # Right-side headers (cols 7-9) — percentage changes
+      for (ci in seq_along(col_hdrs_20)) {
+        writeData(wb, sn, col_hdrs_20[ci], startRow = 1, startCol = ci + 6)
+        addStyle(wb, sn, .hs(), rows = 1, cols = ci + 6, stack = TRUE)
       }
+
+      # Left-side row labels (col 1)
+      left_labels_20 <- c("Current", "Quarterly change", "Year on year change",
+                           "Pre-pandemic trend (Jan-Mar)", "Since 2024 election")
+      for (i in seq_along(left_labels_20)) {
+        writeData(wb, sn, left_labels_20[i], startRow = i + 1, startCol = 1)
+        addStyle(wb, sn, .cmp_label(), rows = i + 1, cols = 1, stack = TRUE)
+      }
+      # Right-side row labels (col 6)
+      right_labels_20 <- c("Current", "Quarterly change", "Year on year change",
+                            "Pre-pandemic trend (Jan-Mar)", "Since 2010 election")
+      for (i in seq_along(right_labels_20)) {
+        writeData(wb, sn, right_labels_20[i], startRow = i + 1, startCol = 6)
+        addStyle(wb, sn, .cmp_label(), rows = i + 1, cols = 6, stack = TRUE)
+      }
+
+      # Write source data at row 9
+      writeData(wb, sn, tbl_20, colNames = FALSE, startRow = 9)
+
+      # Detect data start row (source data col C = output col 3)
+      off_20 <- 8
+      dsr_20 <- .first_num_r(tbl_20, 3) + off_20  # vacancies in col 3 (C)
+
+      # Find baseline rows dynamically (source data labels are like "Jan-Mar 2020")
+      .fr20 <- function(label) {
+        idx <- .find_row(tbl_20, label)
+        if (!is.na(idx)) idx + off_20 else NA_integer_
+      }
+      prepandemic_r <- .fr20("Jan-Mar 2020")
+      elec2024_r    <- .fr20("Apr-Jun 2024")
+      elec2010_r    <- .fr20("Dec-Feb 2010")
+
+      # Source data columns: C(3)=Vacancies, D(4)=Unemployment, E(5)=Ratio
+      cl_c <- "C"; cl_d <- "D"; cl_e <- "E"
+
+      # LEFT SIDE: absolute value formulas (written to cols B=2, C=3, D=4)
+      # Note: Unemployment (D) and Ratio (E) use COUNTA()-1 (one period lag)
+
+      # Row 2: Current
+      .wf(wb, sn, .fml_last(cl_c, dsr_20), 2, 2)           # Vacancies
+      .wf(wb, sn, .fml_last(cl_d, dsr_20, -1), 2, 3)       # Unemployment (lagged)
+      .wf(wb, sn, .fml_last(cl_e, dsr_20, -1), 2, 4)       # Ratio (lagged)
+
+      # Row 3: Quarterly change
+      .wf(wb, sn, .fml_idx_change(cl_c, dsr_20, 3), 3, 2)
+      .wf(wb, sn, sprintf("%s-%s", .fml_last(cl_d, dsr_20, -1), .fml_last(cl_d, dsr_20, -4)), 3, 3)
+      .wf(wb, sn, sprintf("%s-%s", .fml_last(cl_e, dsr_20, -1), .fml_last(cl_e, dsr_20, -4)), 3, 4)
+
+      # Row 4: Year on year change
+      .wf(wb, sn, .fml_idx_change(cl_c, dsr_20, 12), 4, 2)
+      .wf(wb, sn, sprintf("%s-%s", .fml_last(cl_d, dsr_20, -1), .fml_last(cl_d, dsr_20, -13)), 4, 3)
+      .wf(wb, sn, sprintf("%s-%s", .fml_last(cl_e, dsr_20, -1), .fml_last(cl_e, dsr_20, -13)), 4, 4)
+
+      # Row 5: Pre-pandemic trend
+      if (!is.na(prepandemic_r)) {
+        .wf(wb, sn, sprintf("%s-%s$%d", .fml_last(cl_c, dsr_20), cl_c, prepandemic_r), 5, 2)
+        .wf(wb, sn, sprintf("%s-%s$%d", .fml_last(cl_d, dsr_20, -1), cl_d, prepandemic_r), 5, 3)
+        .wf(wb, sn, sprintf("%s-%s$%d", .fml_last(cl_e, dsr_20, -1), cl_e, prepandemic_r), 5, 4)
+      }
+
+      # Row 6: Since 2024 election
+      if (!is.na(elec2024_r)) {
+        .wf(wb, sn, sprintf("%s-%s$%d", .fml_last(cl_c, dsr_20), cl_c, elec2024_r), 6, 2)
+        .wf(wb, sn, sprintf("%s-%s$%d", .fml_last(cl_d, dsr_20, -1), cl_d, elec2024_r), 6, 3)
+        .wf(wb, sn, sprintf("%s-%s$%d", .fml_last(cl_e, dsr_20, -1), cl_e, elec2024_r), 6, 4)
+      }
+
+      # RIGHT SIDE: percentage change formulas (written to cols G=7, H=8, I=9)
+
+      # Row 2: Current (mirrors left side)
+      .wf(wb, sn, "B2", 2, 7)
+      .wf(wb, sn, "C2", 2, 8)
+      .wf(wb, sn, "D2", 2, 9)
+
+      # Row 3: Quarterly % change
+      .wf(wb, sn, sprintf("B3/%s", .fml_last(cl_c, dsr_20, -1)), 3, 7)
+      .wf(wb, sn, sprintf("C3/%s", .fml_last(cl_d, dsr_20, -2)), 3, 8)
+      .wf(wb, sn, sprintf("D3/%s", .fml_last(cl_e, dsr_20, -2)), 3, 9)
+
+      # Row 4: Year on year % change
+      .wf(wb, sn, sprintf("B4/%s", .fml_last(cl_c, dsr_20, -12)), 4, 7)
+      .wf(wb, sn, sprintf("C4/%s", .fml_last(cl_d, dsr_20, -13)), 4, 8)
+      .wf(wb, sn, sprintf("D4/%s", .fml_last(cl_e, dsr_20, -13)), 4, 9)
+
+      # Row 5: Pre-pandemic % change
+      if (!is.na(prepandemic_r)) {
+        .wf(wb, sn, sprintf("B5/C%d", prepandemic_r), 5, 7)
+        .wf(wb, sn, sprintf("C5/D%d", prepandemic_r), 5, 8)
+        .wf(wb, sn, sprintf("D5/E%d", prepandemic_r), 5, 9)
+      }
+
+      # Row 6: Since 2010 election % change
+      if (!is.na(elec2010_r)) {
+        .wf(wb, sn, sprintf("B6/C%d", elec2010_r), 6, 7)
+        .wf(wb, sn, sprintf("C6/D%d", elec2010_r), 6, 8)
+        .wf(wb, sn, sprintf("D6/E%d", elec2010_r), 6, 9)
+      }
+
+      # Formatting
       addStyle(wb, sn, .num_fmt(), rows = 2:6, cols = 2:4, gridExpand = TRUE, stack = TRUE)
+      addStyle(wb, sn, .pct_fmt(), rows = 2:6, cols = 7:9, gridExpand = TRUE, stack = TRUE)
 
       # Notes
-      writeData(wb, sn, "*note: covid period is different (Jan-Mar) due to reporting periods",
+      writeData(wb, sn,
+                "*note: 1. Stats for unemployment are from the period before as data unavailable - check this is still the case.",
                 startRow = 7, startCol = 1)
-      addStyle(wb, sn, .cmp_sep(), rows = 7, cols = 1:4, gridExpand = TRUE, stack = TRUE)
+      writeData(wb, sn,
+                "2. Covid period is different (Jan-Mar) due to reporting periods",
+                startRow = 8, startCol = 1)
+      addStyle(wb, sn, .cmp_sep(), rows = 6, cols = 1:9, gridExpand = TRUE, stack = TRUE)
 
-      # Write original data from row 9
-      writeData(wb, sn, tbl_20, colNames = FALSE, startRow = 9)
+      # Source data styling
       addStyle(wb, sn, .data_font(), rows = 9:(9 + nrow(tbl_20)),
                cols = 1:ncol(tbl_20), gridExpand = TRUE, stack = TRUE)
       setColWidths(wb, sn, cols = 1, widths = 16)
       setColWidths(wb, sn, cols = 2:4, widths = 22)
+      setColWidths(wb, sn, cols = 6, widths = 30)
+      setColWidths(wb, sn, cols = 7:9, widths = 22)
     }
   }
 
@@ -1062,9 +1472,10 @@ create_audit_workbook <- function(
     if (nrow(tbl_21) > 0 && ncol(tbl_21) >= 3) {
       sn <- "21"
       addWorksheet(wb, sn, tabColour = "#2F5496")
+      max_col_21 <- min(ncol(tbl_21), 24)
 
-      # Row 1: Industry headers from source data
-      for (ci in 2:min(ncol(tbl_21), 20)) {
+      # Row 1: Industry headers from source data (extend to col 24)
+      for (ci in 3:max_col_21) {
         hdr <- as.character(tbl_21[[ci]][1])
         if (!is.na(hdr) && nchar(hdr) > 0) {
           writeData(wb, sn, hdr, startRow = 1, startCol = ci)
@@ -1072,31 +1483,87 @@ create_audit_workbook <- function(
         }
       }
 
-      # Comparison rows — lookup by LFS labels
+      # Comparison row labels (rows 2-6)
       cmp_labels_21 <- c("Current", "Quarterly change", "year on year change",
-                          "pre-pandemic trend (Dec-Feb)")
+                          "pre-pandemic trend (Dec-Feb)", "Since 2010 election")
       for (i in seq_along(cmp_labels_21)) {
-        writeData(wb, sn, cmp_labels_21[i], startRow = i + 1, startCol = 1)
-        addStyle(wb, sn, .cmp_label(), rows = i + 1, cols = 1, stack = TRUE)
+        writeData(wb, sn, cmp_labels_21[i], startRow = i + 1, startCol = 2)
+        addStyle(wb, sn, .cmp_label(), rows = i + 1, cols = 2, stack = TRUE)
       }
-      # Vacancies current + quarterly from computed data
-      if (!is.na(vac_m$cur)) writeData(wb, sn, vac_m$cur, startRow = 2, startCol = 3)
-      if (!is.na(vac_m$dq))  writeData(wb, sn, vac_m$dq, startRow = 3, startCol = 3)
-      if (!is.na(vac_m$dy))  writeData(wb, sn, vac_m$dy, startRow = 4, startCol = 3)
-      if (!is.na(vac_m$dc))  writeData(wb, sn, vac_m$dc, startRow = 5, startCol = 3)
-      addStyle(wb, sn, .cmp_sep(), rows = 5, cols = 1:min(ncol(tbl_21), 20),
+
+      # Write source data at row 9
+      writeData(wb, sn, tbl_21, colNames = FALSE, startRow = 9)
+
+      # Detect data start row (first numeric in col 3)
+      off_21 <- 8
+      dsr_21 <- .first_num_r(tbl_21, 3) + off_21
+
+      # Find baseline rows
+      .fr21 <- function(label) {
+        idx <- .find_row(tbl_21, label)
+        if (!is.na(idx)) idx + off_21 else NA_integer_
+      }
+      prepandemic_21 <- .fr21("Dec-Feb 2020")
+      elec2010_21    <- .fr21("Feb-Apr 2010")
+
+      # Write formulas for all industry columns (3 to max_col_21)
+      # Col C (3) = All vacancies — uses absolute changes (subtraction)
+      # All other cols = industry sub-sectors — use % changes (division-1)
+      for (ci in 3:max_col_21) {
+        cl <- .col_letter(ci)
+        is_total <- (ci == 3)  # "All vacancies" column
+
+        # Row 2: Current
+        .wf(wb, sn, .fml_last(cl, dsr_21), 2, ci)
+
+        # Row 3: Quarterly change
+        if (is_total) {
+          .wf(wb, sn, .fml_idx_change(cl, dsr_21, 3), 3, ci)
+        } else {
+          .wf(wb, sn, .fml_idx_pct(cl, dsr_21, 3), 3, ci)
+        }
+
+        # Row 4: Year on year change
+        if (is_total) {
+          .wf(wb, sn, .fml_idx_change(cl, dsr_21, 12), 4, ci)
+        } else {
+          .wf(wb, sn, .fml_idx_pct(cl, dsr_21, 12), 4, ci)
+        }
+
+        # Row 5: Pre-pandemic (Dec-Feb 2020)
+        if (!is.na(prepandemic_21)) {
+          if (is_total) {
+            .wf(wb, sn, .fml_idx_change_fixed(cl, dsr_21, prepandemic_21), 5, ci)
+          } else {
+            .wf(wb, sn, .fml_idx_pct_fixed(cl, dsr_21, prepandemic_21), 5, ci)
+          }
+        }
+
+        # Row 6: Since 2010 election
+        if (!is.na(elec2010_21)) {
+          if (is_total) {
+            .wf(wb, sn, .fml_idx_change_fixed(cl, dsr_21, elec2010_21), 6, ci)
+          } else {
+            .wf(wb, sn, .fml_idx_pct_fixed(cl, dsr_21, elec2010_21), 6, ci)
+          }
+        }
+      }
+
+      # Formatting
+      addStyle(wb, sn, .num_fmt(), rows = 2:6, cols = 3, gridExpand = TRUE, stack = TRUE)
+      addStyle(wb, sn, .pct_fmt(), rows = 3:6, cols = 4:max_col_21, gridExpand = TRUE, stack = TRUE)
+      addStyle(wb, sn, .cmp_sep(), rows = 6, cols = 1:max_col_21,
                gridExpand = TRUE, stack = TRUE)
 
-      # Write original data from row 7
-      writeData(wb, sn, tbl_21, colNames = FALSE, startRow = 7)
-      addStyle(wb, sn, .data_font(), rows = 7:(7 + nrow(tbl_21)),
+      # Source data styling
+      addStyle(wb, sn, .data_font(), rows = 9:(9 + nrow(tbl_21)),
                cols = 1:ncol(tbl_21), gridExpand = TRUE, stack = TRUE)
       setColWidths(wb, sn, cols = 1, widths = 16)
     }
   }
 
   # --- X09 Sheet "AWE Real_CPI" with comparisons ---
-  if (!is.null(file_x09) && exists("tbl_cpi") && nrow(tbl_cpi) > 0 && exists("cw")) {
+  if (!is.null(file_x09) && exists("tbl_cpi") && nrow(tbl_cpi) > 0) {
     sn <- "AWE Real_CPI"
     addWorksheet(wb, sn, tabColour = "#BF8F00")
 
@@ -1110,71 +1577,105 @@ create_audit_workbook <- function(
     }
 
     # Comparison rows 2-8
-    cmp_labels_cpi <- c("Current (3mo avg)", "Change on quarter (3mo avg)",
+    cmp_labels_cpi <- c("Current  (3mo avg)", "Change on quarter  (3mo avg)",
                          "Change year on year (3mo avg)",
                          "Change since Covid-19 (2019 average)",
                          "Change since 2010", "Change since financial crisis",
                          "Change since 2024 election")
     for (i in seq_along(cmp_labels_cpi)) {
-      r <- i + 1
-      writeData(wb, sn, cmp_labels_cpi[i], startRow = r, startCol = 1)
-      addStyle(wb, sn, .cmp_label(), rows = r, cols = 1, stack = TRUE)
+      writeData(wb, sn, cmp_labels_cpi[i], startRow = i + 1, startCol = 1)
+      addStyle(wb, sn, .cmp_label(), rows = i + 1, cols = 1, stack = TRUE)
     }
 
-    # Fill CPI comparison values
-    if (exists("cpi_months") && exists("cpi_real") && exists("cpi_total")) {
-      cpi_reg <- suppressWarnings(as.numeric(gsub("[^0-9.-]", "", as.character(tbl_cpi[[9]]))))
-
-      # Current (3mo avg)
-      cur_total_real <- .avg_by_dates(cpi_months, cpi_real, cw)
-      cur_reg_real   <- .avg_by_dates(cpi_months, cpi_reg, cw)
-      if (!is.na(cur_total_real)) writeData(wb, sn, cur_total_real, startRow = 2, startCol = 2)
-      if (!is.na(cur_reg_real))   writeData(wb, sn, cur_reg_real, startRow = 2, startCol = 4)
-
-      # Change on quarter
-      if (!is.na(wages_cpi_m$dq)) writeData(wb, sn, wages_cpi_m$dq, startRow = 3, startCol = 2)
-
-      # Change year on year
-      if (!is.na(wages_cpi_m$dy)) writeData(wb, sn, wages_cpi_m$dy, startRow = 4, startCol = 2)
-      if (!is.na(wages_cpi_m$cur)) writeData(wb, sn, wages_cpi_m$cur / 100, startRow = 4, startCol = 3)
-
-      # Change since Covid-19
-      if (!is.na(wages_cpi_m$dc)) writeData(wb, sn, wages_cpi_m$dc, startRow = 5, startCol = 2)
-
-      # Change since 2010
-      yr2010_val <- .avg_by_dates(cpi_months, cpi_real,
-                                   as.Date(c("2010-04-01", "2010-05-01", "2010-06-01")))
-      if (!is.na(cur_total_real) && !is.na(yr2010_val)) {
-        writeData(wb, sn, (cur_total_real - yr2010_val) * 52, startRow = 6, startCol = 2)
-        if (yr2010_val != 0) writeData(wb, sn, (cur_total_real - yr2010_val) / yr2010_val,
-                                       startRow = 6, startCol = 3)
-      }
-
-      # Change since financial crisis (Dec 2007)
-      dec2007_val <- .val_by_date(cpi_months, cpi_real, as.Date("2007-12-01"))
-      if (!is.na(cur_total_real) && !is.na(dec2007_val)) {
-        writeData(wb, sn, (cur_total_real - dec2007_val) * 52, startRow = 7, startCol = 2)
-        if (dec2007_val != 0) writeData(wb, sn, (cur_total_real - dec2007_val) / dec2007_val,
-                                        startRow = 7, startCol = 3)
-      }
-
-      # Change since 2024 election
-      if (!is.na(wages_cpi_m$de)) writeData(wb, sn, wages_cpi_m$de, startRow = 8, startCol = 2)
-    }
-
-    addStyle(wb, sn, .num_fmt(), rows = 2:8, cols = c(2, 4), gridExpand = TRUE, stack = TRUE)
-    addStyle(wb, sn, .pct_fmt(), rows = 2:8, cols = c(3, 5), gridExpand = TRUE, stack = TRUE)
-    addStyle(wb, sn, .cmp_sep(), rows = 8, cols = 1:9, gridExpand = TRUE, stack = TRUE)
-
-    # Write original CPI data from row 9 with fixed dates
+    # Write source data at row 9
     if (is.character(tbl_cpi[[1]])) tbl_cpi[[1]] <- .detect_dates(tbl_cpi[[1]])
     if (inherits(tbl_cpi[[1]], c("POSIXct", "POSIXt"))) tbl_cpi[[1]] <- as.Date(tbl_cpi[[1]])
     if (is.numeric(tbl_cpi[[1]])) tbl_cpi[[1]] <- as.Date(tbl_cpi[[1]], origin = "1899-12-30")
     writeData(wb, sn, tbl_cpi, colNames = FALSE, startRow = 9)
-    date_rows_cpi <- which(!is.na(tbl_cpi[[1]])) + 8
-    if (length(date_rows_cpi) > 0) {
-      addStyle(wb, sn, .date_fmt(), rows = date_rows_cpi, cols = 1, stack = TRUE)
+
+    # Detect data start rows
+    off_cpi <- 8
+    dsr_cpi_b <- .first_num_r(tbl_cpi, 2) + off_cpi  # Total Pay £ (col B)
+    dsr_cpi_e <- .first_num_r(tbl_cpi, 5) + off_cpi  # Total Pay YoY % (col E)
+    dsr_cpi_f <- .first_num_r(tbl_cpi, 6) + off_cpi  # Regular Pay £ (col F)
+    dsr_cpi_i <- .first_num_r(tbl_cpi, 9) + off_cpi  # Regular Pay YoY % (col I)
+
+    # Find baseline rows
+    dates_cpi <- .detect_dates(tbl_cpi[[1]])
+    .drc <- function(d) {
+      idx <- which(dates_cpi == as.Date(d))
+      if (length(idx)) idx[1] + off_cpi else NA_integer_
     }
+    covid_cpi_r1 <- .drc("2019-12-01"); covid_cpi_r3 <- .drc("2020-02-01")
+    e2010_cpi_r1 <- .drc("2010-04-01"); e2010_cpi_r3 <- .drc("2010-06-01")
+    fc_cpi_r1    <- .drc("2007-12-01"); fc_cpi_r3    <- .drc("2008-02-01")
+    e2024_cpi_r1 <- .drc("2024-04-01"); e2024_cpi_r3 <- .drc("2024-06-01")
+
+    # Write formulas
+    # Col 2: Total Pay £ (source col B), Col 4: Regular Pay £ (source col F)
+    for (spec in list(list(ci = 2, cl = "B", dsr = dsr_cpi_b),
+                      list(ci = 4, cl = "F", dsr = dsr_cpi_f))) {
+      cl <- spec$cl; dsr <- spec$dsr; ci <- spec$ci
+
+      # Row 2: Current (3mo avg)
+      .wf(wb, sn, .fml_avg_last(cl, dsr), 2, ci)
+
+      # Row 3: Change on quarter (3mo avg) *52
+      .wf(wb, sn, sprintf("(%s)*52", .fml_change_avg(cl, dsr, -5)), 3, ci)
+
+      # Row 4: Change YoY (3mo avg) *52
+      .wf(wb, sn, sprintf("(%s)*52", .fml_change_avg(cl, dsr, -14)), 4, ci)
+
+      # Rows 5-8: Change since fixed baselines *52
+      baselines <- list(
+        list(r = 5, r1 = covid_cpi_r1, r3 = covid_cpi_r3),
+        list(r = 6, r1 = e2010_cpi_r1, r3 = e2010_cpi_r3),
+        list(r = 7, r1 = fc_cpi_r1,    r3 = fc_cpi_r3),
+        list(r = 8, r1 = e2024_cpi_r1, r3 = e2024_cpi_r3)
+      )
+      for (bl in baselines) {
+        if (!is.na(bl$r1) && !is.na(bl$r3)) {
+          .wf(wb, sn, sprintf("(%s-AVERAGE($%s$%d:$%s$%d))*52",
+                               .fml_avg_last(cl, dsr), cl, bl$r1, cl, bl$r3), bl$r, ci)
+        }
+      }
+    }
+
+    # Col 3: Total Pay % — Row 4 = YoY from source col E; Rows 5-8 = pct change
+    .wf(wb, sn, .fml_last("E", dsr_cpi_e), 4, 3)
+    for (bl in list(
+      list(r = 5, r1 = covid_cpi_r1, r3 = covid_cpi_r3),
+      list(r = 6, r1 = e2010_cpi_r1, r3 = e2010_cpi_r3),
+      list(r = 7, r1 = fc_cpi_r1,    r3 = fc_cpi_r3),
+      list(r = 8, r1 = e2024_cpi_r1, r3 = e2024_cpi_r3)
+    )) {
+      if (!is.na(bl$r1) && !is.na(bl$r3))
+        .wf(wb, sn, sprintf("(%s/AVERAGE($%s$%d:$%s$%d))-1",
+                             .fml_avg_last("B", dsr_cpi_b), "B", bl$r1, "B", bl$r3), bl$r, 3)
+    }
+
+    # Col 5: Regular Pay % — Row 4 = YoY from source col I; Rows 5-8 = pct change
+    .wf(wb, sn, .fml_last("I", dsr_cpi_i), 4, 5)
+    for (bl in list(
+      list(r = 5, r1 = covid_cpi_r1, r3 = covid_cpi_r3),
+      list(r = 6, r1 = e2010_cpi_r1, r3 = e2010_cpi_r3),
+      list(r = 7, r1 = fc_cpi_r1,    r3 = fc_cpi_r3),
+      list(r = 8, r1 = e2024_cpi_r1, r3 = e2024_cpi_r3)
+    )) {
+      if (!is.na(bl$r1) && !is.na(bl$r3))
+        .wf(wb, sn, sprintf("(%s/AVERAGE($%s$%d:$%s$%d))-1",
+                             .fml_avg_last("F", dsr_cpi_f), "F", bl$r1, "F", bl$r3), bl$r, 5)
+    }
+
+    # Formatting
+    addStyle(wb, sn, .gbp_fmt(), rows = 2:8, cols = c(2, 4), gridExpand = TRUE, stack = TRUE)
+    addStyle(wb, sn, .pct_fmt(), rows = 4:8, cols = c(3, 5), gridExpand = TRUE, stack = TRUE)
+    addStyle(wb, sn, .cmp_sep(), rows = 8, cols = 1:9, gridExpand = TRUE, stack = TRUE)
+
+    # Source data styling
+    date_rows_cpi <- which(!is.na(tbl_cpi[[1]])) + 8
+    if (length(date_rows_cpi) > 0)
+      addStyle(wb, sn, .date_fmt(), rows = date_rows_cpi, cols = 1, stack = TRUE)
     addStyle(wb, sn, .data_font(), rows = 9:(9 + nrow(tbl_cpi)),
              cols = 1:ncol(tbl_cpi), gridExpand = TRUE, stack = TRUE)
     setColWidths(wb, sn, cols = 1, widths = 14)
@@ -1185,12 +1686,12 @@ create_audit_workbook <- function(
   if (!is.null(file_hr1)) {
     tbl_1a <- .safe_read(file_hr1, "1a")
     if (nrow(tbl_1a) > 0 && ncol(tbl_1a) >= 2) {
-      # If sheet was already created by simple .ws() call, skip
       if (!"1a" %in% names(wb)) addWorksheet(wb, "1a", tabColour = "#C00000")
       sn <- "1a"
+      max_ci_1a <- min(ncol(tbl_1a), 13)
 
-      # Region headers (row 1) from source data
-      for (ci in 2:min(ncol(tbl_1a), 12)) {
+      # Row 1: Region headers from source data
+      for (ci in 2:max_ci_1a) {
         hdr <- as.character(tbl_1a[[ci]][1])
         if (!is.na(hdr) && nchar(hdr) > 0) {
           writeData(wb, sn, hdr, startRow = 1, startCol = ci)
@@ -1198,7 +1699,7 @@ create_audit_workbook <- function(
         }
       }
 
-      # Comparison rows
+      # Comparison row labels (rows 2-7)
       cmp_labels_1a <- c("Current", "Average since start of 2023",
                           "Average pre-covid (April 2019-February 2020)",
                           "Change on month", "Change on quarter", "Change on year")
@@ -1207,77 +1708,263 @@ create_audit_workbook <- function(
         addStyle(wb, sn, .cmp_label(), rows = i + 1, cols = 1, stack = TRUE)
       }
 
-      # Compute values from HR1 data
-      # Find where date data begins (skip metadata rows)
+      # Write source data at row 9
+      writeData(wb, sn, tbl_1a, colNames = FALSE, startRow = 9)
+
+      # Detect data start row
+      off_1a <- 8
+      dsr_1a <- .first_num_r(tbl_1a, 2) + off_1a
+
+      # Find pre-covid range (Apr 2019 - Feb 2020)
       hr1_dates <- .detect_dates(tbl_1a[[1]])
-      hr1_valid <- which(!is.na(hr1_dates))
-      if (length(hr1_valid) >= 3) {
-        max_ci <- min(ncol(tbl_1a), 12)
-        for (ci in 2:max_ci) {
-          hr1_vals <- suppressWarnings(as.numeric(as.character(tbl_1a[[ci]])))
-          n_valid <- sum(!is.na(hr1_vals[hr1_valid]))
-          if (n_valid == 0) next
-
-          # Current: average of last 3 months
-          last3_idx <- hr1_valid[(length(hr1_valid) - min(2, length(hr1_valid) - 1)):length(hr1_valid)]
-          cur_avg <- mean(hr1_vals[last3_idx], na.rm = TRUE)
-          if (!is.na(cur_avg)) writeData(wb, sn, cur_avg, startRow = 2, startCol = ci)
-
-          # Average since start of 2023
-          since2023 <- which(hr1_dates >= as.Date("2023-01-01") & !is.na(hr1_vals))
-          if (length(since2023) > 0) {
-            avg2023 <- mean(hr1_vals[since2023], na.rm = TRUE)
-            if (!is.na(avg2023)) writeData(wb, sn, avg2023, startRow = 3, startCol = ci)
-          }
-
-          # Average pre-covid (April 2019 - February 2020)
-          precov <- which(hr1_dates >= as.Date("2019-04-01") & hr1_dates <= as.Date("2020-02-01") & !is.na(hr1_vals))
-          if (length(precov) > 0) {
-            avg_precov <- mean(hr1_vals[precov], na.rm = TRUE)
-            if (!is.na(avg_precov)) writeData(wb, sn, avg_precov, startRow = 4, startCol = ci)
-          }
-
-          # Change on month
-          if (length(hr1_valid) >= 2) {
-            v_last <- hr1_vals[hr1_valid[length(hr1_valid)]]
-            v_prev <- hr1_vals[hr1_valid[length(hr1_valid) - 1]]
-            if (!is.na(v_last) && !is.na(v_prev) && v_prev != 0) {
-              writeData(wb, sn, (v_last - v_prev) / v_prev, startRow = 5, startCol = ci)
-            }
-          }
-
-          # Change on quarter (3mo avg change)
-          if (length(hr1_valid) >= 6) {
-            prev3_idx <- hr1_valid[(length(hr1_valid) - 5):(length(hr1_valid) - 3)]
-            prev_avg <- mean(hr1_vals[prev3_idx], na.rm = TRUE)
-            if (!is.na(cur_avg) && !is.na(prev_avg) && prev_avg != 0) {
-              writeData(wb, sn, (cur_avg - prev_avg) / prev_avg, startRow = 6, startCol = ci)
-            }
-          }
-
-          # Change on year (3mo avg vs same 3 months last year)
-          yr_ago_dates <- hr1_dates[last3_idx] %m-% months(12)
-          yr_vals <- vapply(yr_ago_dates, function(d) {
-            idx <- which(hr1_dates == d)
-            if (length(idx) > 0) hr1_vals[idx[1]] else NA_real_
-          }, numeric(1))
-          yr_avg <- mean(yr_vals, na.rm = TRUE)
-          if (!is.na(cur_avg) && !is.na(yr_avg) && yr_avg != 0) {
-            writeData(wb, sn, (cur_avg - yr_avg) / yr_avg, startRow = 7, startCol = ci)
-          }
-        }
-        addStyle(wb, sn, .num_fmt(), rows = 2:4, cols = 2:max_ci, gridExpand = TRUE, stack = TRUE)
-        addStyle(wb, sn, .pct_fmt(), rows = 5:7, cols = 2:max_ci, gridExpand = TRUE, stack = TRUE)
+      .dra <- function(d) {
+        idx <- which(hr1_dates == as.Date(d))
+        if (length(idx)) idx[1] + off_1a else NA_integer_
       }
-      addStyle(wb, sn, .cmp_sep(), rows = 7, cols = 1:min(ncol(tbl_1a), 12),
+      precov_start <- .dra("2019-04-01")
+      precov_end   <- .dra("2020-02-01")
+
+      # Write formulas for all region columns
+      for (ci in 2:max_ci_1a) {
+        cl <- .col_letter(ci)
+        rng <- sprintf("%s$%d:%s$1048576", cl, dsr_1a, cl)
+        arng <- sprintf("$A$%d:$A$1048576", dsr_1a)
+
+        # Row 2: Current (avg of last 3)
+        .wf(wb, sn, .fml_avg_last(cl, dsr_1a), 2, ci)
+
+        # Row 3: Average since start of 2023 (MATCH serial 44927 = Jan 1 2023)
+        .wf(wb, sn, sprintf("AVERAGE(INDEX(%s,MATCH(44927,%s,0)):INDEX(%s,COUNTA(%s)))",
+                             rng, arng, rng, rng), 3, ci)
+
+        # Row 4: Average pre-covid (fixed range)
+        if (!is.na(precov_start) && !is.na(precov_end))
+          .wf(wb, sn, .fml_avg_range(cl, precov_start, precov_end), 4, ci)
+
+        # Row 5: Change on month = (avg3 / avg3_offset(-3)) - 1
+        .wf(wb, sn, .fml_pct_avg(cl, dsr_1a, -3), 5, ci)
+
+        # Row 6: Change on quarter = (avg3 / avg3_offset(-5)) - 1
+        .wf(wb, sn, .fml_pct_avg(cl, dsr_1a, -5), 6, ci)
+
+        # Row 7: Change on year = (avg3 / avg3_offset(-14)) - 1
+        .wf(wb, sn, .fml_pct_avg(cl, dsr_1a, -14), 7, ci)
+      }
+
+      # Formatting
+      addStyle(wb, sn, .num_fmt(), rows = 2:4, cols = 2:max_ci_1a, gridExpand = TRUE, stack = TRUE)
+      addStyle(wb, sn, .pct_fmt(), rows = 5:7, cols = 2:max_ci_1a, gridExpand = TRUE, stack = TRUE)
+      addStyle(wb, sn, .cmp_sep(), rows = 7, cols = 1:max_ci_1a,
                gridExpand = TRUE, stack = TRUE)
 
-      # Write original data from row 9
-      writeData(wb, sn, tbl_1a, colNames = FALSE, startRow = 9)
+      # Source data styling
       addStyle(wb, sn, .data_font(), rows = 9:(9 + nrow(tbl_1a)),
                cols = 1:ncol(tbl_1a), gridExpand = TRUE, stack = TRUE)
       setColWidths(wb, sn, cols = 1, widths = 20)
     }
+  }
+
+  # --- Employee levels - LFS,RTI,WFJ (cross-reference sheet) ---
+  if (exists("tbl_rtisa") && nrow(tbl_rtisa) > 0 && !is.null(file_a01)) {
+    el_sn <- "Employee levels - LFS,RTI,WFJ"
+    addWorksheet(wb, el_sn, tabColour = "#8DB4E2")
+
+    pay_sn_ref <- "'1. Payrolled employees (UK)'"
+
+    # ---- Compute source data positions ----
+
+    # Payroll: tbl_rtisa written at startRow=5
+    rtisa_labels_el <- trimws(as.character(tbl_rtisa[[1]]))
+    pay_date_pat <- "^(January|February|March|April|May|June|July|August|September|October|November|December)\\s+\\d{4}$"
+    pay_date_idx <- which(grepl(pay_date_pat, rtisa_labels_el, ignore.case = TRUE))
+    pay_n_dates <- length(pay_date_idx)
+    pay_first_src <- if (pay_n_dates > 0) pay_date_idx[1] else NA
+    pay_first_out <- if (!is.na(pay_first_src)) pay_first_src + 4 else NA
+    # El row 2 → payroll (pay_first_out - 1), El row 3 → payroll pay_first_out
+    pay_off <- if (!is.na(pay_first_out)) pay_first_out - 3 else NA
+
+    # WFJ: tbl_5 written at startRow=7 in sheet "5"
+    wfj_n <- 0; wfj_off <- NA
+    if (exists("tbl_5") && nrow(tbl_5) > 0) {
+      s5_labels_el <- trimws(as.character(tbl_5[[1]]))
+      wfj_date_idx <- which(grepl("^(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\\s+\\d{2}", s5_labels_el))
+      wfj_n <- length(wfj_date_idx)
+      if (wfj_n > 0) {
+        wfj_first_out <- wfj_date_idx[1] + 6  # startRow=7
+        wfj_off <- wfj_first_out - 2  # El row 2 → WFJ wfj_first_out
+      }
+    }
+
+    # LFS: tbl_2_full at startRow=11 in sheet "2"
+    lfs_n <- 0; lfs2_off <- NA; lfs3_off <- NA
+    lfs_pat_el <- "^(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)-(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\\s+\\d{4}$"
+    if (exists("tbl_2_full") && nrow(tbl_2_full) > 0) {
+      s2_labels_el <- trimws(as.character(tbl_2_full[[1]]))
+      lfs_idx <- which(grepl(lfs_pat_el, s2_labels_el))
+      lfs_n <- length(lfs_idx)
+      if (lfs_n > 0) {
+        lfs2_first_out <- lfs_idx[1] + 10  # startRow=11
+        lfs2_off <- lfs2_first_out - 3  # El row 3 → Sheet2 lfs2_first_out
+      }
+    }
+
+    # Sheet "3": re-read to find employee jobs data positions (written at startRow=1)
+    tbl_3_el <- .safe_read(file_a01, "3")
+    if (nrow(tbl_3_el) > 0 && ncol(tbl_3_el) >= 3) {
+      s3_labels_el <- trimws(as.character(tbl_3_el[[1]]))
+      lfs3_idx <- which(grepl(lfs_pat_el, s3_labels_el))
+      if (length(lfs3_idx) > 0) {
+        lfs3_first_out <- lfs3_idx[1]  # startRow=1
+        lfs3_off <- lfs3_first_out - 3  # El row 3 → Sheet3 lfs3_first_out
+      }
+    }
+
+    # ---- Row ranges ----
+    pay_last_el <- if (pay_n_dates > 0) 2 + pay_n_dates else 2
+    lfs_last_el <- if (lfs_n > 0) 2 + lfs_n else 2
+    wfj_last_el <- if (wfj_n > 0) 1 + wfj_n else 2
+    max_el_row <- max(pay_last_el, lfs_last_el, wfj_last_el, na.rm = TRUE)
+
+    # ---- Row 1: Headers ----
+    for (pair in list(c(1, "RTI - Payroll employees"), c(6, "LFS"), c(9, "WFJ"),
+                      c(14, "LFS employees"), c(15, "RTI employees"),
+                      c(16, "WFJ employee jobs"))) {
+      writeData(wb, el_sn, pair[2], startRow = 1, startCol = as.integer(pair[1]))
+      addStyle(wb, el_sn, .hs(), rows = 1, cols = as.integer(pair[1]), stack = TRUE)
+    }
+
+    # ---- Row 2: Sub-headers and first reference row ----
+    for (pair in list(c(3, "New date format"), c(4, "3-month rolling average"),
+                      c(6, "Quarter "), c(7, "Employee jobs"))) {
+      writeData(wb, el_sn, pair[2], startRow = 2, startCol = as.integer(pair[1]))
+    }
+
+    # A2, B2: payroll header row reference (one row before first date)
+    if (!is.na(pay_off)) {
+      .wf(wb, el_sn, sprintf("%s!A%d", pay_sn_ref, 2 + pay_off), 2, 1)
+      .wf(wb, el_sn, sprintf("%s!B%d", pay_sn_ref, 2 + pay_off), 2, 2)
+    }
+    # I2, J2: WFJ first reference
+    if (!is.na(wfj_off)) {
+      .wf(wb, el_sn, sprintf("'5'!A%d", 2 + wfj_off), 2, 9)
+      .wf(wb, el_sn, sprintf("'5'!C%d", 2 + wfj_off), 2, 10)
+    }
+
+    # ---- Payroll formulas (cols A, B): rows 3 to pay_last_el ----
+    if (!is.na(pay_off) && pay_last_el >= 3) {
+      for (r in 3:pay_last_el) {
+        pay_r <- r + pay_off
+        .wf(wb, el_sn, sprintf("DATEVALUE(%s!A%d)", pay_sn_ref, pay_r), r, 1)
+        .wf(wb, el_sn, sprintf("%s!B%d", pay_sn_ref, pay_r), r, 2)
+      }
+    }
+
+    # ---- 3-month rolling labels (col C) and averages (col D): rows 5+ ----
+    pay_dates_el <- .detect_dates(tbl_rtisa[[1]][pay_date_idx])
+    if (pay_n_dates >= 3) {
+      for (i in 3:pay_n_dates) {
+        r <- i + 2  # date index 1→el_row 3, index 3→el_row 5
+        d_end <- pay_dates_el[i]
+        d_start <- d_end %m-% months(2)
+        label <- sprintf("%s-%s %s", format(d_start, "%b"), format(d_end, "%b"),
+                          format(d_end, "%Y"))
+        writeData(wb, el_sn, label, startRow = r, startCol = 3)
+        .wf(wb, el_sn, sprintf("AVERAGE(B%d:B%d)", r - 2, r), r, 4)
+      }
+    }
+
+    # ---- LFS formulas (cols F, G): rows 3 to lfs_last_el ----
+    if (lfs_n > 0 && !is.na(lfs2_off)) {
+      for (r in 3:lfs_last_el) {
+        .wf(wb, el_sn, sprintf("'2'!A%d", r + lfs2_off), r, 6)
+        if (!is.na(lfs3_off))
+          .wf(wb, el_sn, sprintf("'3'!C%d", r + lfs3_off), r, 7)
+      }
+    }
+
+    # ---- WFJ formulas (cols I, J): rows 3 to wfj_last_el ----
+    if (wfj_n > 0 && !is.na(wfj_off) && wfj_last_el >= 3) {
+      for (r in 3:wfj_last_el) {
+        .wf(wb, el_sn, sprintf("'5'!A%d", r + wfj_off), r, 9)
+        .wf(wb, el_sn, sprintf("'5'!C%d", r + wfj_off), r, 10)
+      }
+    }
+
+    # ---- Cols L-P: Percentage comparisons ----
+    # Col L = LFS quarter labels aligned to payroll months
+    # Col M = year extracted from L
+    # Col N = LFS employee jobs as % of a reference quarter
+    # Col O = RTI 3mo rolling as % of a reference value
+    # Col P = WFJ employee jobs as % of a reference quarter (every 3rd row)
+
+    # Find reference rows for normalization:
+    # G ref row: LFS value at ~Q4 2019 (pre-pandemic)
+    # D ref row: payroll 3mo rolling at ~Jan 2020
+    # J ref row: WFJ at ~Dec 2019-Feb 2020
+
+    if (lfs_n > 0 && !is.na(lfs2_off) && !is.na(lfs3_off) && pay_n_dates >= 3) {
+      # Find the LFS quarter index for "Dec-Feb 2020" (pre-pandemic reference)
+      if (exists("tbl_2_full")) {
+        s2_labels_all <- trimws(as.character(tbl_2_full[[1]]))[lfs_idx]
+        lfs_prepand_idx <- grep("Dec-Feb\\s+2020", s2_labels_all, ignore.case = TRUE)
+        lfs_prepand_el <- if (length(lfs_prepand_idx) > 0) lfs_prepand_idx[1] + 2 else NA
+      } else { lfs_prepand_el <- NA }
+
+      # G reference row: the LFS employees value at pre-pandemic quarter
+      g_ref_el <- lfs_prepand_el
+
+      # D reference row: payroll rolling avg at ~Jan 2020
+      pay_jan2020_idx <- which(pay_dates_el == as.Date("2020-01-01"))
+      d_ref_el <- if (length(pay_jan2020_idx) > 0) pay_jan2020_idx[1] + 2 else NA
+
+      # J reference row for WFJ
+      if (exists("tbl_5") && wfj_n > 0) {
+        s5_dates_el <- trimws(as.character(tbl_5[[1]]))[wfj_date_idx]
+        wfj_prepand_idx <- grep("Dec\\s+19", s5_dates_el, ignore.case = TRUE)
+        wfj_prepand_el <- if (length(wfj_prepand_idx) > 0) wfj_prepand_idx[1] + 1 else NA
+      } else { wfj_prepand_el <- NA }
+
+      # Determine which LFS quarter aligns with the start of payroll data
+      # The LFS quarters that correspond to payroll months start ~55 quarters after first LFS
+      # We compute the LFS quarter offset to align with el_row 2
+      if (lfs_n > 55) {
+        lfs_align_offset <- 55  # approximate; aligns LFS quarters to payroll months
+
+        # L, M, N: LFS-aligned percentages
+        lfs_align_end <- min(pay_last_el, 2 + lfs_n - lfs_align_offset)
+        for (r in 2:min(lfs_align_end, pay_last_el)) {
+          lfs_src_r <- r + lfs_align_offset
+          if (lfs_src_r <= lfs_last_el) {
+            .wf(wb, el_sn, sprintf("F%d", lfs_src_r), r, 12)  # L: quarter label
+            .wf(wb, el_sn, sprintf("RIGHT(L%d,4)", r), r, 13)  # M: year
+            if (!is.na(g_ref_el))
+              .wf(wb, el_sn, sprintf("(G%d/$G$%d)*100", lfs_src_r, g_ref_el), r, 14)  # N: LFS %
+          }
+          if (!is.na(d_ref_el) && r + 3 <= pay_last_el)
+            .wf(wb, el_sn, sprintf("(D%d/$D$%d)*100", r + 3, d_ref_el), r, 15)  # O: RTI %
+        }
+
+        # P: WFJ % (every 3rd row)
+        if (!is.na(wfj_prepand_el) && wfj_n > 0) {
+          wfj_qtr_idx <- 0
+          for (r in seq(2, min(pay_last_el, wfj_last_el), by = 3)) {
+            wfj_src_el <- r + lfs_align_offset
+            wfj_j_r <- wfj_src_el
+            if (wfj_j_r >= 2 && wfj_j_r <= wfj_last_el)
+              .wf(wb, el_sn, sprintf("J%d/$J$%d*100", wfj_j_r, wfj_prepand_el), r, 16)
+          }
+        }
+      }
+    }
+
+    # ---- Formatting ----
+    addStyle(wb, el_sn, .date_fmt(), rows = 3:pay_last_el, cols = 1, stack = TRUE)
+    addStyle(wb, el_sn, .num_fmt(), rows = 2:max_el_row, cols = c(2, 4, 7, 10),
+             gridExpand = TRUE, stack = TRUE)
+    addStyle(wb, el_sn, .data_font(), rows = 1:max_el_row, cols = 1:16,
+             gridExpand = TRUE, stack = TRUE)
+    setColWidths(wb, el_sn, cols = 1:16,
+                  widths = c(14, 14, 14, 16, 3, 14, 14, 3, 14, 14, 3, 14, 8, 14, 14, 14))
   }
 
   # ==========================================================================
@@ -1595,6 +2282,7 @@ create_audit_workbook <- function(
     "International Comparisons >>>", "Final Table", "Unemployment", "Employment", "Inactivity",
     "Charts >>>",
     "Wages charts", "Emp, Unemp & Inac Chart", "Payrolled Employees Chart",
+    "Employee levels - LFS,RTI,WFJ",
     "Vacancy and redundancy charts",
     "International Comparisons", "Regional breakdowns"
   )
