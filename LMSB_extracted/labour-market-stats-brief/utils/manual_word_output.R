@@ -487,39 +487,16 @@ generate_manual_word_output <- function(
   oecd_ft <- .build_oecd_flextable(oecd_unemp_data, oecd_emp_data, oecd_inact_data)
 
   if (!is.null(oecd_ft)) {
-    # Insert OECD section before "External Commentary" paragraph
-    # Use officer cursor to find position
-    content_summary <- docx_summary(doc)
-    ext_comm_idx <- which(grepl("External Commentary", content_summary$text, fixed = TRUE))[1]
-
-    if (!is.na(ext_comm_idx)) {
-      # Position cursor just before External Commentary
-      doc <- cursor_reach(doc, keyword = "External Commentary")
-      # Insert OECD section heading + table + footnotes before External Commentary
-      doc <- body_add_par(doc, "", style = "Normal", pos = "before")
-      doc <- body_add_par(doc, "OECD International Comparisons", style = "heading 2", pos = "before")
-      doc <- body_add_par(doc, "", style = "Normal", pos = "before")
-      doc <- body_add_flextable(doc, oecd_ft, pos = "before")
-      doc <- body_add_par(doc, "", style = "Normal", pos = "before")
-      doc <- body_add_par(doc,
-        "*Latest UK data from ONS Labour Force Survey. OECD data schedules may vary by country.",
-        style = "Normal", pos = "before")
-      doc <- body_add_par(doc,
-        "Source: OECD Infra-annual labour statistics. Unemployment rate: aged 15+. Employment and inactivity rates: aged 15-64.",
-        style = "Normal", pos = "before")
-      doc <- body_add_par(doc, "", style = "Normal", pos = "before")
-    } else {
-      # Fallback: append at end
-      doc <- body_add_par(doc, "")
-      doc <- body_add_par(doc, "OECD International Comparisons", style = "heading 2")
-      doc <- body_add_par(doc, "")
-      doc <- body_add_flextable(doc, oecd_ft)
-      doc <- body_add_par(doc, "")
-      doc <- body_add_par(doc,
-        "*Latest UK data from ONS Labour Force Survey. OECD data schedules may vary by country.")
-      doc <- body_add_par(doc,
-        "Source: OECD Infra-annual labour statistics. Unemployment rate: aged 15+. Employment and inactivity rates: aged 15-64.")
-    }
+    # Append OECD section at the very end of the document (last page)
+    doc <- body_add_break(doc, type = "page")
+    doc <- body_add_par(doc, "OECD International Comparisons", style = "heading 2")
+    doc <- body_add_par(doc, "")
+    doc <- body_add_flextable(doc, oecd_ft)
+    doc <- body_add_par(doc, "")
+    doc <- body_add_par(doc,
+      "*Latest UK data from ONS Labour Force Survey. OECD data schedules may vary by country.")
+    doc <- body_add_par(doc,
+      "Source: OECD Infra-annual labour statistics. Unemployment rate: aged 15+. Employment and inactivity rates: aged 15-64.")
     if (verbose) message("[manual] OECD comparison table inserted")
   }
 

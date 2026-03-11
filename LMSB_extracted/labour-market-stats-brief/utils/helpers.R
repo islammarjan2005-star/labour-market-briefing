@@ -28,6 +28,14 @@ make_lfs_label <- function(end_date) {
   sprintf("%s-%s %s", format(start_date, "%b"), format(end_date, "%b"), format(end_date, "%Y"))
 }
 
+# Make LFS long-form narrative label: end_date -> "October 2025 to December 2025"
+lfs_label_narrative <- function(end_date) {
+  if (is.null(end_date) || is.na(end_date)) return("")
+  end_date <- as.Date(end_date)
+  start_date <- end_date %m-% months(2)
+  paste0(format(start_date, "%B %Y"), " to ", format(end_date, "%B %Y"))
+}
+
 # --- Number formatters ---
 
 # Format to 1 decimal place (or more if rounds to zero)
