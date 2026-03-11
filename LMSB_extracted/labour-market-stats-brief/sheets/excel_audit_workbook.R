@@ -183,12 +183,12 @@ if (!exists("parse_manual_month", inherits = TRUE)) {
 
 # Formula: pct change = avg_last_3 / avg_at_offset - 1
 .fml_pct_avg <- function(cl, sr, off) {
-  sprintf("%s/%s-1", .fml_avg_last(cl, sr), .fml_avg_offset(cl, sr, off))
+  sprintf("IFERROR(%s/%s-1,\"\")", .fml_avg_last(cl, sr), .fml_avg_offset(cl, sr, off))
 }
 
 # Formula: pct change vs fixed row range = avg_last_3 / AVERAGE(CL$r1:CL$r2) - 1
 .fml_pct_fixed <- function(cl, sr, r1, r2) {
-  sprintf("%s/AVERAGE(%s$%d:%s$%d)-1", .fml_avg_last(cl, sr), cl, r1, cl, r2)
+  sprintf("IFERROR(%s/AVERAGE(%s$%d:%s$%d)-1,\"\")", .fml_avg_last(cl, sr), cl, r1, cl, r2)
 }
 
 # Formula: simple INDEX change = last - last_at_offset
@@ -198,7 +198,7 @@ if (!exists("parse_manual_month", inherits = TRUE)) {
 
 # Formula: simple INDEX pct change = last / last_at_offset - 1
 .fml_idx_pct <- function(cl, sr, off) {
-  sprintf("%s/%s-1", .fml_last(cl, sr), .fml_last(cl, sr, -off))
+  sprintf("IFERROR(%s/%s-1,\"\")", .fml_last(cl, sr), .fml_last(cl, sr, -off))
 }
 
 # Formula: INDEX change vs fixed row = last - CL$r
@@ -208,7 +208,7 @@ if (!exists("parse_manual_month", inherits = TRUE)) {
 
 # Formula: INDEX pct vs fixed row = last / CL$r - 1
 .fml_idx_pct_fixed <- function(cl, sr, r) {
-  sprintf("%s/%s$%d-1", .fml_last(cl, sr), cl, r)
+  sprintf("IFERROR(%s/%s$%d-1,\"\")", .fml_last(cl, sr), cl, r)
 }
 
 # Formula: MAX of column
@@ -238,11 +238,18 @@ if (!exists("parse_manual_month", inherits = TRUE)) {
 # Write a source sheet: read from Excel, write to workbook with clean formatting
 .write_source_sheet <- function(wb, sheet_name, source_path, source_sheet,
                                  tab_colour = "#2F5496", start_row = 1,
-                                 date_col = NULL, date_fmt_str = "MMM-YY") {
+                                 date_col = NULL, date_fmt_str = "MMM-YY",
+                                 title = NULL) {
   tbl <- .safe_read(source_path, source_sheet)
   if (nrow(tbl) == 0) return(invisible(NULL))
 
   addWorksheet(wb, sheet_name, tabColour = tab_colour)
+
+  if (!is.null(title)) {
+    writeData(wb, sheet_name, title, startRow = 1, startCol = 1)
+    addStyle(wb, sheet_name, .ts(), rows = 1, cols = 1)
+    if (start_row < 2) start_row <- 2
+  }
 
   # Fix date columns before writing (handles character, POSIXct, and numeric serials)
   if (!is.null(date_col) && date_col <= ncol(tbl)) {
@@ -365,16 +372,16 @@ create_audit_workbook <- function(
   wb <- createWorkbook()
 
   # Helper: write a simple source sheet with no comparison rows
-  .ws <- function(src, src_sheet, tgt_sheet, tab_col = "#2F5496", date_col = NULL) {
+  .ws <- function(src, src_sheet, tgt_sheet, tab_col = "#2F5496", date_col = NULL, title = NULL) {
     if (is.null(src)) return()
-    .write_source_sheet(wb, tgt_sheet, src, src_sheet, tab_colour = tab_col, date_col = date_col)
+    .write_source_sheet(wb, tgt_sheet, src, src_sheet, tab_colour = tab_col, date_col = date_col, title = title)
   }
 
   # --- A01 simple sheets (no comparison rows) ---
   .ws(file_a01, "1", "Sheet1", "#2F5496", date_col = 1)
-  .ws(file_a01, "3", "3", "#2F5496", date_col = 1)
+  .ws(file_a01, "3", "3", "#2F5496", date_col = 1, title = "Economic activity by age")
   .ws(file_a01, "19", "19", "#2F5496", date_col = 1)
-  .ws(file_a01, "22", "22", "#843C0C", date_col = 1)
+  .ws(file_a01, "22", "22", "#843C0C", date_col = 1, title = "Young people not in education, employment or training (NEET)")
 
   # --- RTISA simple sheets ---
   .ws(file_rtisa, "6. Employee flows (UK)", "RTI. Employee flows (UK)", "#548235", date_col = 1)
@@ -604,13 +611,13 @@ create_audit_workbook <- function(
       # Row 3: % (formulas)
       writeData(wb, sn, "%", startRow = 3, startCol = 1)
       addStyle(wb, sn, .cmp_label(), rows = 3, cols = 1, stack = TRUE)
-      .wf(wb, sn, sprintf("%s/%s-1", .fml_last(cl, dsr), .fml_last(cl, dsr, -1)), 3, 3) # Month %
+      .wf(wb, sn, sprintf("IFERROR(%s/%s-1,\"\")", .fml_last(cl, dsr), .fml_last(cl, dsr, -1)), 3, 3) # Month %
       .wf(wb, sn, .fml_pct_avg(cl, dsr, -5), 3, 4)                                      # Quarter %
       .wf(wb, sn, .fml_pct_avg(cl, dsr, -14), 3, 5)                                     # YoY %
-      if (!is.na(covid_r)) .wf(wb, sn, sprintf("%s/AVERAGE(%s$%d:%s$%d)-1", .fml_last(cl, dsr), cl, covid_r, cl, covid_r + 2), 3, 6)
+      if (!is.na(covid_r)) .wf(wb, sn, sprintf("IFERROR(%s/AVERAGE(%s$%d:%s$%d)-1,\"\")", .fml_last(cl, dsr), cl, covid_r, cl, covid_r + 2), 3, 6)
       if (!is.na(elec_r)) .wf(wb, sn, .fml_pct_fixed(cl, dsr, elec_r, elec_r + 2), 3, 7)
-      if (!is.na(office_r)) .wf(wb, sn, sprintf("%s/%s$%d-1", .fml_last(cl, dsr), cl, office_r), 3, 8)
-      .wf(wb, sn, sprintf('%s/_xlfn.XLOOKUP("January "&TEXT(TODAY(),"yyyy"),A$%d:A$1048576,B$%d:B$1048576)-1', .fml_last("B", dsr), dsr, dsr), 3, 9)
+      if (!is.na(office_r)) .wf(wb, sn, sprintf("IFERROR(%s/%s$%d-1,\"\")", .fml_last(cl, dsr), cl, office_r), 3, 8)
+      .wf(wb, sn, sprintf('IFERROR(%s/_xlfn.XLOOKUP("January "&TEXT(TODAY(),"yyyy"),A$%d:A$1048576,B$%d:B$1048576)-1,"")', .fml_last("B", dsr), dsr, dsr), 3, 9)
 
       addStyle(wb, sn, .num_fmt(), rows = 2, cols = 2:10, gridExpand = TRUE, stack = TRUE)
       addStyle(wb, sn, .pct_fmt(), rows = 3, cols = 3:9, gridExpand = TRUE, stack = TRUE)
@@ -1421,27 +1428,27 @@ create_audit_workbook <- function(
       .wf(wb, sn, "D2", 2, 9)
 
       # Row 3: Quarterly % change
-      .wf(wb, sn, sprintf("B3/%s", .fml_last(cl_c, dsr_20, -1)), 3, 7)
-      .wf(wb, sn, sprintf("C3/%s", .fml_last(cl_d, dsr_20, -2)), 3, 8)
-      .wf(wb, sn, sprintf("D3/%s", .fml_last(cl_e, dsr_20, -2)), 3, 9)
+      .wf(wb, sn, sprintf("IFERROR(B3/%s,\"\")", .fml_last(cl_c, dsr_20, -1)), 3, 7)
+      .wf(wb, sn, sprintf("IFERROR(C3/%s,\"\")", .fml_last(cl_d, dsr_20, -2)), 3, 8)
+      .wf(wb, sn, sprintf("IFERROR(D3/%s,\"\")", .fml_last(cl_e, dsr_20, -2)), 3, 9)
 
       # Row 4: Year on year % change
-      .wf(wb, sn, sprintf("B4/%s", .fml_last(cl_c, dsr_20, -12)), 4, 7)
-      .wf(wb, sn, sprintf("C4/%s", .fml_last(cl_d, dsr_20, -13)), 4, 8)
-      .wf(wb, sn, sprintf("D4/%s", .fml_last(cl_e, dsr_20, -13)), 4, 9)
+      .wf(wb, sn, sprintf("IFERROR(B4/%s,\"\")", .fml_last(cl_c, dsr_20, -12)), 4, 7)
+      .wf(wb, sn, sprintf("IFERROR(C4/%s,\"\")", .fml_last(cl_d, dsr_20, -13)), 4, 8)
+      .wf(wb, sn, sprintf("IFERROR(D4/%s,\"\")", .fml_last(cl_e, dsr_20, -13)), 4, 9)
 
       # Row 5: Pre-pandemic % change
       if (!is.na(prepandemic_r)) {
-        .wf(wb, sn, sprintf("B5/C%d", prepandemic_r), 5, 7)
-        .wf(wb, sn, sprintf("C5/D%d", prepandemic_r), 5, 8)
-        .wf(wb, sn, sprintf("D5/E%d", prepandemic_r), 5, 9)
+        .wf(wb, sn, sprintf("IFERROR(B5/C%d,\"\")", prepandemic_r), 5, 7)
+        .wf(wb, sn, sprintf("IFERROR(C5/D%d,\"\")", prepandemic_r), 5, 8)
+        .wf(wb, sn, sprintf("IFERROR(D5/E%d,\"\")", prepandemic_r), 5, 9)
       }
 
       # Row 6: Since 2010 election % change
       if (!is.na(elec2010_r)) {
-        .wf(wb, sn, sprintf("B6/C%d", elec2010_r), 6, 7)
-        .wf(wb, sn, sprintf("C6/D%d", elec2010_r), 6, 8)
-        .wf(wb, sn, sprintf("D6/E%d", elec2010_r), 6, 9)
+        .wf(wb, sn, sprintf("IFERROR(B6/C%d,\"\")", elec2010_r), 6, 7)
+        .wf(wb, sn, sprintf("IFERROR(C6/D%d,\"\")", elec2010_r), 6, 8)
+        .wf(wb, sn, sprintf("IFERROR(D6/E%d,\"\")", elec2010_r), 6, 9)
       }
 
       # Formatting
@@ -1651,7 +1658,7 @@ create_audit_workbook <- function(
       list(r = 8, r1 = e2024_cpi_r1, r3 = e2024_cpi_r3)
     )) {
       if (!is.na(bl$r1) && !is.na(bl$r3))
-        .wf(wb, sn, sprintf("(%s/AVERAGE($%s$%d:$%s$%d))-1",
+        .wf(wb, sn, sprintf("IFERROR((%s/AVERAGE($%s$%d:$%s$%d))-1,\"\")",
                              .fml_avg_last("B", dsr_cpi_b), "B", bl$r1, "B", bl$r3), bl$r, 3)
     }
 
@@ -1664,7 +1671,7 @@ create_audit_workbook <- function(
       list(r = 8, r1 = e2024_cpi_r1, r3 = e2024_cpi_r3)
     )) {
       if (!is.na(bl$r1) && !is.na(bl$r3))
-        .wf(wb, sn, sprintf("(%s/AVERAGE($%s$%d:$%s$%d))-1",
+        .wf(wb, sn, sprintf("IFERROR((%s/AVERAGE($%s$%d:$%s$%d))-1,\"\")",
                              .fml_avg_last("F", dsr_cpi_f), "F", bl$r1, "F", bl$r3), bl$r, 5)
     }
 
@@ -1815,7 +1822,7 @@ create_audit_workbook <- function(
       s3_labels_el <- trimws(as.character(tbl_3_el[[1]]))
       lfs3_idx <- which(grepl(lfs_pat_el, s3_labels_el))
       if (length(lfs3_idx) > 0) {
-        lfs3_first_out <- lfs3_idx[1]  # startRow=1
+        lfs3_first_out <- lfs3_idx[1] + 1  # startRow=2 (title in row 1)
         lfs3_off <- lfs3_first_out - 3  # El row 3 → Sheet3 lfs3_first_out
       }
     }
@@ -1939,10 +1946,10 @@ create_audit_workbook <- function(
             .wf(wb, el_sn, sprintf("F%d", lfs_src_r), r, 12)  # L: quarter label
             .wf(wb, el_sn, sprintf("RIGHT(L%d,4)", r), r, 13)  # M: year
             if (!is.na(g_ref_el))
-              .wf(wb, el_sn, sprintf("(G%d/$G$%d)*100", lfs_src_r, g_ref_el), r, 14)  # N: LFS %
+              .wf(wb, el_sn, sprintf("IFERROR((G%d/$G$%d)*100,\"\")", lfs_src_r, g_ref_el), r, 14)  # N: LFS %
           }
           if (!is.na(d_ref_el) && r + 3 <= pay_last_el)
-            .wf(wb, el_sn, sprintf("(D%d/$D$%d)*100", r + 3, d_ref_el), r, 15)  # O: RTI %
+            .wf(wb, el_sn, sprintf("IFERROR((D%d/$D$%d)*100,\"\")", r + 3, d_ref_el), r, 15)  # O: RTI %
         }
 
         # P: WFJ % (every 3rd row)
@@ -1952,7 +1959,7 @@ create_audit_workbook <- function(
             wfj_src_el <- r + lfs_align_offset
             wfj_j_r <- wfj_src_el
             if (wfj_j_r >= 2 && wfj_j_r <= wfj_last_el)
-              .wf(wb, el_sn, sprintf("J%d/$J$%d*100", wfj_j_r, wfj_prepand_el), r, 16)
+              .wf(wb, el_sn, sprintf("IFERROR(J%d/$J$%d*100,\"\")", wfj_j_r, wfj_prepand_el), r, 16)
           }
         }
       }
