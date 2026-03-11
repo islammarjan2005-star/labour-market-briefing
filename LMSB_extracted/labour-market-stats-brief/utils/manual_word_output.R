@@ -7,7 +7,6 @@ suppressPackageStartupMessages({
   library(officer)
   library(xml2)
   library(scales)
-  library(flextable)
   library(readxl)
 })
 
@@ -270,82 +269,41 @@ sv <- function(name, default = NA_real_) {
   if (nrow(results) > 0) return(results) else NULL
 }
 
-# Build the OECD comparison table as a flextable ready for Word insertion.
-# Returns NULL if no data available.
-.build_oecd_flextable <- function(unemp_data, emp_data, inact_data) {
-  if (is.null(unemp_data) && is.null(emp_data) && is.null(inact_data)) return(NULL)
+# Fill OECD placeholder cells in the template.
+# Uses qvz placeholders embedded in ManualDB.docx:
+#   qvzoecd{cc}{col} where cc = uk/us/fr/de/it/es/ca/jp/ea
+#   and col = tp (time period), ur (unemployment), er (employment), ir (inactivity)
+.fill_oecd_placeholders <- function(doc, unemp_data, emp_data, inact_data) {
+  country_codes <- c("United Kingdom" = "uk", "United States" = "us",
+                     "France" = "fr", "Germany" = "de", "Italy" = "it",
+                     "Spain" = "es", "Canada" = "ca", "Japan" = "jp",
+                     "Euro area" = "ea")
 
-  # Merge all three metrics into one table
-  tbl <- data.frame(country = .oecd_countries, stringsAsFactors = FALSE)
-
-  .merge_metric <- function(metric_data, tbl, val_name, period_name) {
-    if (is.null(metric_data)) {
-      tbl[[val_name]] <- ""
-      tbl[[period_name]] <- ""
-      return(tbl)
-    }
-    idx <- match(tbl$country, metric_data$country)
-    tbl[[val_name]] <- ifelse(is.na(idx), "",
-      sapply(metric_data$value[idx], function(v) if (is.na(v)) "" else fmt_one_dec(v)))
-    tbl[[period_name]] <- ifelse(is.na(idx), "", metric_data$period[idx])
-    tbl
+  .get_val <- function(data, country) {
+    if (is.null(data)) return(list(period = "", value = ""))
+    idx <- match(country, data$country)
+    if (is.na(idx)) return(list(period = "", value = ""))
+    list(period = data$period[idx],
+         value = paste0(fmt_one_dec(data$value[idx]), "%"))
   }
 
-  # We need: Country | Time Period | Unemployment Rate | Employment Rate | Inactivity Rate
-  # The time period may differ per metric, so pick the most relevant one
-  # In the published briefing, there's a single "Time Period" column
-  # We'll use unemployment period as primary, fall back to employment, then inactivity
-  tbl <- .merge_metric(unemp_data, tbl, "unemp_val", "unemp_period")
-  tbl <- .merge_metric(emp_data, tbl, "emp_val", "emp_period")
-  tbl <- .merge_metric(inact_data, tbl, "inact_val", "inact_period")
+  for (country in names(country_codes)) {
+    cc <- country_codes[[country]]
+    u <- .get_val(unemp_data, country)
+    e <- .get_val(emp_data, country)
+    ia <- .get_val(inact_data, country)
 
-  # Build the display period (take first non-empty from unemp > emp > inact)
-  tbl$period <- ifelse(nzchar(tbl$unemp_period), tbl$unemp_period,
-                  ifelse(nzchar(tbl$emp_period), tbl$emp_period, tbl$inact_period))
+    # Time period: prefer unemployment, then employment, then inactivity
+    tp <- if (nzchar(u$period)) u$period else if (nzchar(e$period)) e$period else ia$period
+    # UK gets asterisk on time period
+    if (cc == "uk" && nzchar(tp)) tp <- paste0(tp, "*")
 
-  # Add percentage signs to values
-  tbl$unemp_display <- ifelse(nzchar(tbl$unemp_val), paste0(tbl$unemp_val, "%"), "")
-  tbl$emp_display   <- ifelse(nzchar(tbl$emp_val), paste0(tbl$emp_val, "%"), "")
-  tbl$inact_display <- ifelse(nzchar(tbl$inact_val), paste0(tbl$inact_val, "%"), "")
-
-  # Add asterisk for UK
-  tbl$country[tbl$country == "United Kingdom"] <- "United Kingdom*"
-
-  # Final display table
-  display_df <- data.frame(
-    `Country / Region` = tbl$country,
-    `Time Period`      = tbl$period,
-    `Unemployment Rate\n(15+, %)` = tbl$unemp_display,
-    `Employment Rate\n(15-64, %)`  = tbl$emp_display,
-    `Inactivity Rate\n(15-64, %)`  = tbl$inact_display,
-    stringsAsFactors = FALSE,
-    check.names = FALSE
-  )
-
-  ft <- flextable(display_df)
-  ft <- set_header_labels(ft,
-    `Country / Region` = "Country / Region",
-    `Time Period` = "Time Period",
-    `Unemployment Rate\n(15+, %)` = "Unemployment Rate\n(15+, %)",
-    `Employment Rate\n(15-64, %)` = "Employment Rate\n(15-64, %)",
-    `Inactivity Rate\n(15-64, %)` = "Inactivity Rate\n(15-64, %)"
-  )
-  ft <- theme_box(ft)
-  ft <- fontsize(ft, size = 9, part = "all")
-  ft <- font(ft, fontname = "Arial", part = "all")
-  ft <- bold(ft, part = "header")
-  ft <- bg(ft, bg = "#2F5496", part = "header")
-  ft <- color(ft, color = "white", part = "header")
-  ft <- align(ft, j = 3:5, align = "center", part = "all")
-  ft <- align(ft, j = 1:2, align = "left", part = "all")
-  ft <- width(ft, j = 1, width = 1.5)
-  ft <- width(ft, j = 2, width = 1.2)
-  ft <- width(ft, j = 3:5, width = 1.3)
-  # Bold UK row
-  uk_row <- which(grepl("United Kingdom", display_df$`Country / Region`))
-  if (length(uk_row) > 0) ft <- bold(ft, i = uk_row, part = "body")
-
-  ft
+    doc <- replace_all(doc, paste0("qvzoecd", cc, "tp"), tp)
+    doc <- replace_all(doc, paste0("qvzoecd", cc, "ur"), u$value)
+    doc <- replace_all(doc, paste0("qvzoecd", cc, "er"), e$value)
+    doc <- replace_all(doc, paste0("qvzoecd", cc, "ir"), ia$value)
+  }
+  doc
 }
 
 # ---------- main ----------
@@ -481,23 +439,15 @@ generate_manual_word_output <- function(
   doc <- fill_conditional(doc, "qvzwcpde",  .format_gbp_signed0(sv("wages_cpi_change_election")), sv("wages_cpi_change_election"))
 
   # ---- OECD International Comparisons table ----
+  # The OECD page is already in ManualDB.docx with qvzoecd{cc}{col} placeholders.
+  # Just read the data and replace the placeholders.
   oecd_unemp_data <- tryCatch(.read_oecd_latest(file_oecd_unemp), error = function(e) NULL)
   oecd_emp_data   <- tryCatch(.read_oecd_latest(file_oecd_emp),   error = function(e) NULL)
   oecd_inact_data <- tryCatch(.read_oecd_latest(file_oecd_inact), error = function(e) NULL)
-  oecd_ft <- .build_oecd_flextable(oecd_unemp_data, oecd_emp_data, oecd_inact_data)
 
-  if (!is.null(oecd_ft)) {
-    # Append OECD section at the very end of the document (last page)
-    doc <- body_add_break(doc, type = "page")
-    doc <- body_add_par(doc, "OECD International Comparisons", style = "heading 2")
-    doc <- body_add_par(doc, "")
-    doc <- body_add_flextable(doc, oecd_ft)
-    doc <- body_add_par(doc, "")
-    doc <- body_add_par(doc,
-      "*Latest UK data from ONS Labour Force Survey. OECD data schedules may vary by country.")
-    doc <- body_add_par(doc,
-      "Source: OECD Infra-annual labour statistics. Unemployment rate: aged 15+. Employment and inactivity rates: aged 15-64.")
-    if (verbose) message("[manual] OECD comparison table inserted")
+  if (!is.null(oecd_unemp_data) || !is.null(oecd_emp_data) || !is.null(oecd_inact_data)) {
+    doc <- .fill_oecd_placeholders(doc, oecd_unemp_data, oecd_emp_data, oecd_inact_data)
+    if (verbose) message("[manual] OECD comparison table populated")
   }
 
   # ---- clean up any unreplaced qvz placeholders ----
