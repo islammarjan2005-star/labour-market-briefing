@@ -26,18 +26,30 @@ if (!exists("parse_manual_month", inherits = TRUE)) {
     error = function(e) data.frame()
   )
   if (nrow(tbl) == 0) return(tbl)
-  # Coerce character columns to numeric where majority of non-empty values are numeric.
-  # This prevents numbers being stored as text in Excel, which causes #DIV/0! errors
-  # because AVERAGE() and other functions ignore text cells.
+
+  # ONS suppression markers that represent missing numeric data, NOT text content.
+  # Without this, columns like Sheet 18 "Workers involved" (683 [x] + 457 numbers = 40%
+  # numeric) fail the coercion threshold and stay as text, causing #DIV/0! everywhere.
+  ons_markers <- c("[x]", "[c]", "[z]", "..", "-", "~", ":", "[e]", "**",
+                    "[x] ", " [x]", "[c] ", " [c]")
+
   for (ci in seq_len(ncol(tbl))) {
     vals <- tbl[[ci]]
-    if (is.character(vals)) {
-      num_vals <- suppressWarnings(as.numeric(vals))
-      n_non_na <- sum(!is.na(vals) & nchar(trimws(vals)) > 0)
-      n_numeric <- sum(!is.na(num_vals) & !is.na(vals) & nchar(trimws(vals)) > 0)
-      if (n_non_na > 0 && n_numeric / n_non_na > 0.5) {
-        tbl[[ci]] <- num_vals
-      }
+    if (!is.character(vals)) next
+
+    trimmed <- trimws(vals)
+    num_vals <- suppressWarnings(as.numeric(vals))
+
+    is_empty   <- is.na(vals) | nchar(trimmed) == 0
+    is_marker  <- trimmed %in% ons_markers
+    is_numeric <- !is.na(num_vals) & !is_empty
+
+    # Among non-empty values, count those that are numeric data (numbers + markers)
+    n_non_empty <- sum(!is_empty)
+    n_data_vals <- sum(is_numeric | is_marker)
+
+    if (n_non_empty > 0 && n_data_vals / n_non_empty > 0.5) {
+      tbl[[ci]] <- num_vals  # markers and header text both become NA, numbers stay
     }
   }
   tbl
@@ -272,19 +284,7 @@ if (!exists("parse_manual_month", inherits = TRUE)) {
     tbl[[date_col]] <- .detect_dates(tbl[[date_col]])
   }
 
-  # Coerce character columns to numeric where possible
-  for (ci in seq_len(ncol(tbl))) {
-    if (!is.null(date_col) && ci == date_col) next
-    vals <- tbl[[ci]]
-    if (is.character(vals)) {
-      num_vals <- suppressWarnings(as.numeric(vals))
-      n_non_na <- sum(!is.na(vals) & nchar(trimws(vals)) > 0)
-      n_numeric <- sum(!is.na(num_vals) & !is.na(vals) & nchar(trimws(vals)) > 0)
-      if (n_non_na > 0 && n_numeric / n_non_na > 0.5) {
-        tbl[[ci]] <- num_vals
-      }
-    }
-  }
+  # Numeric coercion already handled by .safe_read() (with ONS marker awareness)
 
   writeData(wb, sheet_name, tbl, colNames = FALSE, startRow = start_row)
 
