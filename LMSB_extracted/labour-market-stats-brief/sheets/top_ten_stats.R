@@ -281,9 +281,9 @@ generate_top_ten <- function() {
   )
 
   }, error = function(e) {
-    warning("generate_top_ten() internal error: ", e$message)
+    warning("generate_top_ten() internal error: ", e$message, "\n", paste(capture.output(traceback()), collapse = "\n"))
     fallback <- list()
-    for (i in 1:10) fallback[[paste0("line", i)]] <- "(Data unavailable)"
+    for (i in 1:10) fallback[[paste0("line", i)]] <- paste0("(Data unavailable: ", e$message, ")")
     fallback
   })
 }

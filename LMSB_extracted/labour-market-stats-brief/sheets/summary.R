@@ -1,6 +1,6 @@
 # summary module
-# produces 10 lines 
-# requirescalculations.r to have been sourced 
+# produces 10 lines
+# requirescalculations.r to have been sourced
 
 suppressPackageStartupMessages({
   library(glue)
@@ -8,7 +8,12 @@ suppressPackageStartupMessages({
   library(lubridate)
 })
 
-# small  helpers 
+# ensure helpers are loaded (formatters like fmt_pct, lfs_label_narrative, etc.)
+if (!exists("fmt_pct", inherits = TRUE)) {
+  source("utils/helpers.R")
+}
+
+# small  helpers
 
 fmt_signed_int <- function(x) {
   if (is.na(x)) return("—")
@@ -53,7 +58,10 @@ fmt_pct_unsigned <- function(x) {
   }
 }
 
-safe_num <- function(x) suppressWarnings(as.numeric(x))
+safe_num <- function(x) {
+  if (is.null(x) || length(x) == 0) return(NA_real_)
+  suppressWarnings(as.numeric(x[1]))
+}
 
 pct_from_delta <- function(cur, delta) {
   # cur and delta in the same units
@@ -393,9 +401,9 @@ generate_summary <- function() {
   )
 
   }, error = function(e) {
-    warning("generate_summary() internal error: ", e$message)
+    warning("generate_summary() internal error: ", e$message, "\n", paste(capture.output(traceback()), collapse = "\n"))
     fallback <- list()
-    for (i in 1:10) fallback[[paste0("line", i)]] <- "(Data unavailable)"
+    for (i in 1:10) fallback[[paste0("line", i)]] <- paste0("(Data unavailable: ", e$message, ")")
     fallback
   })
 }

@@ -93,7 +93,7 @@ if (!exists("parse_manual_month", inherits = TRUE)) {
 .pos <- function() createStyle(fontColour = "#006100", fgFill = "#C6EFCE")
 .neg <- function() createStyle(fontColour = "#9C0006", fgFill = "#FFC7CE")
 .sep <- function() createStyle(fontSize = 16, textDecoration = "bold", fontColour = "#1F4E79",
-                                fgFill = "#D9E2F3", halign = "center", valign = "center")
+                                fgFill = "#BDD7EE", halign = "center", valign = "center")
 
 # Comparison row styles
 .cmp_label <- function() createStyle(fontName = "Arial", fontSize = 10, textDecoration = "bold")
@@ -114,7 +114,7 @@ if (!exists("parse_manual_month", inherits = TRUE)) {
 
 # Write a source sheet: read from Excel, write to workbook with clean formatting
 .write_source_sheet <- function(wb, sheet_name, source_path, source_sheet,
-                                 tab_colour = "#4472C4", start_row = 1,
+                                 tab_colour = "#2F5496", start_row = 1,
                                  date_col = NULL, date_fmt_str = "MMM-YY") {
   tbl <- .safe_read(source_path, source_sheet)
   if (nrow(tbl) == 0) return(invisible(NULL))
@@ -242,15 +242,15 @@ create_audit_workbook <- function(
   wb <- createWorkbook()
 
   # Helper: write a simple source sheet with no comparison rows
-  .ws <- function(src, src_sheet, tgt_sheet, tab_col = "#4472C4", date_col = NULL) {
+  .ws <- function(src, src_sheet, tgt_sheet, tab_col = "#2F5496", date_col = NULL) {
     if (is.null(src)) return()
     .write_source_sheet(wb, tgt_sheet, src, src_sheet, tab_colour = tab_col, date_col = date_col)
   }
 
   # --- A01 simple sheets (no comparison rows) ---
-  .ws(file_a01, "1", "Sheet1", "#4472C4", date_col = 1)
-  .ws(file_a01, "3", "3", "#4472C4", date_col = 1)
-  .ws(file_a01, "19", "19", "#4472C4", date_col = 1)
+  .ws(file_a01, "1", "Sheet1", "#2F5496", date_col = 1)
+  .ws(file_a01, "3", "3", "#2F5496", date_col = 1)
+  .ws(file_a01, "19", "19", "#2F5496", date_col = 1)
   .ws(file_a01, "22", "22", "#843C0C", date_col = 1)
 
   # --- RTISA simple sheets ---
@@ -553,7 +553,7 @@ create_audit_workbook <- function(
     tbl_2_full <- .safe_read(file_a01, "2")
     if (nrow(tbl_2_full) > 0 && ncol(tbl_2_full) >= 10) {
       sn <- "2"
-      addWorksheet(wb, sn, tabColour = "#4472C4")
+      addWorksheet(wb, sn, tabColour = "#2F5496")
 
       # Section headers (rows 1-4)
       writeData(wb, sn, "Aged 16 and over", startRow = 1, startCol = 2)
@@ -618,7 +618,7 @@ create_audit_workbook <- function(
     tbl_5 <- .safe_read(file_a01, "5")
     if (nrow(tbl_5) > 0) {
       sn <- "5"
-      addWorksheet(wb, sn, tabColour = "#4472C4")
+      addWorksheet(wb, sn, tabColour = "#2F5496")
 
       # Headers row 1
       col_hdrs <- c("Workforce jobs", "Employee jobs", "Self-employment jobs",
@@ -681,7 +681,7 @@ create_audit_workbook <- function(
     tbl_10_full <- .safe_read(file_a01, "10")
     if (nrow(tbl_10_full) > 0 && ncol(tbl_10_full) >= 6) {
       sn <- "10"
-      addWorksheet(wb, sn, tabColour = "#4472C4")
+      addWorksheet(wb, sn, tabColour = "#2F5496")
 
       # Headers
       for (pair in list(c(2, "People"), c(4, "Men"), c(6, "Women"))) {
@@ -732,7 +732,7 @@ create_audit_workbook <- function(
     tbl_11 <- .safe_read(file_a01, "11")
     if (nrow(tbl_11) > 0 && ncol(tbl_11) >= 6) {
       sn <- "11"
-      addWorksheet(wb, sn, tabColour = "#4472C4")
+      addWorksheet(wb, sn, tabColour = "#2F5496")
 
       # Headers
       writeData(wb, sn, "Economic inactivity by reason (thousands)", startRow = 1, startCol = 3)
@@ -794,7 +794,7 @@ create_audit_workbook <- function(
   # --- A01 Sheet "13": AWE Total Pay (nominal) with comparisons ---
   if (!is.null(file_a01) && exists("tbl_13") && nrow(tbl_13) > 0) {
     sn <- "13"
-    addWorksheet(wb, sn, tabColour = "#4472C4")
+    addWorksheet(wb, sn, tabColour = "#2F5496")
 
     # Sector headers (rows 1-3 matching reference)
     for (pair in list(c(2, "Whole Economy"), c(5, "Private sector"), c(8, "Public sector"),
@@ -863,7 +863,7 @@ create_audit_workbook <- function(
     tbl_15_full <- .safe_read(file_a01, "15")
     if (nrow(tbl_15_full) > 0) {
       sn <- "15"
-      addWorksheet(wb, sn, tabColour = "#4472C4")
+      addWorksheet(wb, sn, tabColour = "#2F5496")
 
       # Sector headers
       for (pair in list(c(2, "Whole Economy"), c(5, "Private sector"),
@@ -942,7 +942,7 @@ create_audit_workbook <- function(
     tbl_18 <- .safe_read(file_a01, "18")
     if (nrow(tbl_18) > 0) {
       sn <- "18"
-      addWorksheet(wb, sn, tabColour = "#4472C4")
+      addWorksheet(wb, sn, tabColour = "#2F5496")
 
       # Headers
       col_hdrs_18 <- c("Working days lost (thousands)", "Number of stoppages",
@@ -1017,7 +1017,7 @@ create_audit_workbook <- function(
     tbl_20 <- .safe_read(file_a01, "20")
     if (nrow(tbl_20) > 0) {
       sn <- "20"
-      addWorksheet(wb, sn, tabColour = "#4472C4")
+      addWorksheet(wb, sn, tabColour = "#2F5496")
 
       # Headers
       col_hdrs_20 <- c("All Vacancies (thousands)", "Unemployment (thousands)",
@@ -1061,7 +1061,7 @@ create_audit_workbook <- function(
     tbl_21 <- .safe_read(file_a01, "21")
     if (nrow(tbl_21) > 0 && ncol(tbl_21) >= 3) {
       sn <- "21"
-      addWorksheet(wb, sn, tabColour = "#4472C4")
+      addWorksheet(wb, sn, tabColour = "#2F5496")
 
       # Row 1: Industry headers from source data
       for (ci in 2:min(ncol(tbl_21), 20)) {
@@ -1380,7 +1380,7 @@ create_audit_workbook <- function(
         )
     }
 
-    .insert_chart <- function(wb, sheet_name, plot_obj, title, tab_col = "#B4C6E7",
+    .insert_chart <- function(wb, sheet_name, plot_obj, title, tab_col = "#8DB4E2",
                                width = 22, height = 13) {
       addWorksheet(wb, sheet_name, tabColour = tab_col)
       writeData(wb, sheet_name, title, startRow = 1, startCol = 1)
@@ -1461,7 +1461,7 @@ create_audit_workbook <- function(
                  subtitle = "16-64 age group, seasonally adjusted",
                  x = NULL, y = "Rate (%)", colour = NULL) +
             .govuk_theme()
-          .insert_chart(wb, "Emp, Unemp & Inac Chart", p_eui, "Employment, Unemployment & Inactivity Rates", "#4472C4")
+          .insert_chart(wb, "Emp, Unemp & Inac Chart", p_eui, "Employment, Unemployment & Inactivity Rates", "#2F5496")
         }
       }
     }
@@ -1507,7 +1507,7 @@ create_audit_workbook <- function(
                  x = NULL, y = "Vacancies (000s)") +
             .govuk_theme()
           .insert_chart(wb, "Vacancy and redundancy charts", p_vac,
-                        "Vacancies & Redundancies", "#4472C4")
+                        "Vacancies & Redundancies", "#2F5496")
           vac_chart_made <- TRUE
         }
       }
@@ -1518,7 +1518,7 @@ create_audit_workbook <- function(
     for (ch_name in c("Wages charts", "Emp, Unemp & Inac Chart",
                        "Payrolled Employees Chart", "Vacancy and redundancy charts")) {
       if (!ch_name %in% names(wb)) {
-        addWorksheet(wb, ch_name, tabColour = "#B4C6E7")
+        addWorksheet(wb, ch_name, tabColour = "#8DB4E2")
         writeData(wb, ch_name, data.frame(Note = "Install ggplot2 package to generate charts automatically."))
       }
     }
@@ -1528,7 +1528,7 @@ create_audit_workbook <- function(
   for (sep_name in c("Redundancies >>>", "Labour market flows >>>",
                       "International Comparisons >>>", "Charts >>>")) {
     if (!sep_name %in% names(wb)) {
-      addWorksheet(wb, sep_name, tabColour = "#B4C6E7")
+      addWorksheet(wb, sep_name, tabColour = "#8DB4E2")
       writeData(wb, sep_name, data.frame(X = sep_name), startRow = 1, colNames = FALSE)
       addStyle(wb, sep_name, .sep(), rows = 1, cols = 1)
       setColWidths(wb, sep_name, cols = 1, widths = 50)
