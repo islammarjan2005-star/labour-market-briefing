@@ -121,14 +121,9 @@ if (!exists("parse_manual_month", inherits = TRUE)) {
 
   addWorksheet(wb, sheet_name, tabColour = tab_colour)
 
-  # Fix date columns before writing
+  # Fix date columns before writing (handles character, POSIXct, and numeric serials)
   if (!is.null(date_col) && date_col <= ncol(tbl)) {
-    x <- tbl[[date_col]]
-    if (inherits(x, c("POSIXct", "POSIXt"))) {
-      tbl[[date_col]] <- as.Date(x)
-    } else if (is.numeric(x)) {
-      tbl[[date_col]] <- as.Date(x, origin = "1899-12-30")
-    }
+    tbl[[date_col]] <- .detect_dates(tbl[[date_col]])
   }
 
   # Coerce character columns to numeric where possible
@@ -253,16 +248,16 @@ create_audit_workbook <- function(
   }
 
   # --- A01 simple sheets (no comparison rows) ---
-  .ws(file_a01, "1", "Sheet1", "#4472C4")
-  .ws(file_a01, "3", "3", "#4472C4")
-  .ws(file_a01, "19", "19", "#4472C4")
-  .ws(file_a01, "22", "22", "#843C0C")
+  .ws(file_a01, "1", "Sheet1", "#4472C4", date_col = 1)
+  .ws(file_a01, "3", "3", "#4472C4", date_col = 1)
+  .ws(file_a01, "19", "19", "#4472C4", date_col = 1)
+  .ws(file_a01, "22", "22", "#843C0C", date_col = 1)
 
   # --- RTISA simple sheets ---
-  .ws(file_rtisa, "6. Employee flows (UK)", "RTI. Employee flows (UK)", "#548235")
+  .ws(file_rtisa, "6. Employee flows (UK)", "RTI. Employee flows (UK)", "#548235", date_col = 1)
 
   # --- HR1 sheets (1b, 2a, 2b are simple; 1a gets comparison rows in Step 3) ---
-  for (s in c("1b", "2a", "2b")) .ws(file_hr1, s, s, "#C00000")
+  for (s in c("1b", "2a", "2b")) .ws(file_hr1, s, s, "#C00000", date_col = 1)
 
   # --- CLA01 ---
   cla_sheet <- .detect_sheet(file_cla01, c("1", "People SA", "People", "People_SA", "Sheet1", "CLA01"))
@@ -844,9 +839,7 @@ create_audit_workbook <- function(
     addStyle(wb, sn, .cmp_sep(), rows = 8, cols = 1:11, gridExpand = TRUE, stack = TRUE)
 
     # Write original data from row 9 with fixed dates
-    if (is.character(tbl_13[[1]])) tbl_13[[1]] <- .detect_dates(tbl_13[[1]])
-    if (inherits(tbl_13[[1]], c("POSIXct", "POSIXt"))) tbl_13[[1]] <- as.Date(tbl_13[[1]])
-    if (is.numeric(tbl_13[[1]])) tbl_13[[1]] <- as.Date(tbl_13[[1]], origin = "1899-12-30")
+    tbl_13[[1]] <- .detect_dates(tbl_13[[1]])
     writeData(wb, sn, tbl_13, colNames = FALSE, startRow = 9)
     # Apply date format to col A
     date_rows_13 <- which(!is.na(tbl_13[[1]])) + 8
@@ -926,9 +919,7 @@ create_audit_workbook <- function(
       addStyle(wb, sn, .cmp_sep(), rows = 8, cols = 1:11, gridExpand = TRUE, stack = TRUE)
 
       # Write original data from row 9 with fixed dates
-      if (is.character(tbl_15_full[[1]])) tbl_15_full[[1]] <- .detect_dates(tbl_15_full[[1]])
-      if (inherits(tbl_15_full[[1]], c("POSIXct", "POSIXt"))) tbl_15_full[[1]] <- as.Date(tbl_15_full[[1]])
-      if (is.numeric(tbl_15_full[[1]])) tbl_15_full[[1]] <- as.Date(tbl_15_full[[1]], origin = "1899-12-30")
+      tbl_15_full[[1]] <- .detect_dates(tbl_15_full[[1]])
       writeData(wb, sn, tbl_15_full, colNames = FALSE, startRow = 9)
       date_rows_15 <- which(!is.na(tbl_15_full[[1]])) + 8
       if (length(date_rows_15) > 0) {
