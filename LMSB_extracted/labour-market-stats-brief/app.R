@@ -684,8 +684,8 @@ server <- function(input, output, session) {
     # match by filename — check longer/more-specific names FIRST
     if (grepl("cla01", nm)) return("cla01")
     if (grepl("rtisa", nm)) return("rtisa")
-    # OECD files — detect by keyword in filename (before a01/x02)
-    if (grepl("oecd", nm)) return(.detect_oecd_type(nm))
+    # OECD files — detect by keyword in filename, then inspect contents
+    if (grepl("oecd", nm)) return(.detect_oecd_type(nm, path))
     if (grepl("a01", nm)) return("a01")
     if (grepl("hr1", nm)) return("hr1")
     if (grepl("x09", nm)) return("x09")
@@ -698,16 +698,73 @@ server <- function(input, output, session) {
     if (any(grepl("payrolled employees", sheets))) return("rtisa")
     if (any(grepl("claimant", sheets)) || any(grepl("people sa", sheets))) return("cla01")
     if (any(grepl("labour market flows", sheets))) return("x02")
+    # Last resort: check if this is an OECD file by inspecting contents
+    # (catches files with non-standard names like OECD.SDD.TPS.DSD_LFS@...)
+    oecd_result <- .detect_oecd_metric_from_content(path)
+    if (!is.null(oecd_result)) return(oecd_result)
     NULL
   }
 
-  # OECD sub-type detection from filename
-  .detect_oecd_type <- function(nm) {
+  # OECD content-based metric detection — inspects file contents to determine
+  # if it's unemployment, employment, or inactivity data (since OECD downloads
+  # all have identical filenames differing only by timestamp).
+  .detect_oecd_metric_from_content <- function(path) {
+    tryCatch({
+      ext <- tolower(tools::file_ext(path))
+      if (ext %in% c("xlsx", "xls")) {
+        sheets <- readxl::excel_sheets(path)
+        # Try "Table" sheet first — has metadata like "Measure: Unemployment rate"
+        tbl_sheet <- if ("Table" %in% sheets) "Table" else NULL
+        if (!is.null(tbl_sheet)) {
+          tbl <- suppressMessages(readxl::read_excel(path, sheet = tbl_sheet,
+                                                      col_names = FALSE, n_max = 10))
+          all_text <- tolower(paste(unlist(tbl), collapse = " "))
+          if (grepl("unemployment", all_text)) return("oecd_unemp")
+          if (grepl("inactivity", all_text))   return("oecd_inact")
+          if (grepl("employment", all_text))   return("oecd_emp")
+        }
+        # Fallback: check SDMX data sheet for MEASURE column
+        check_sheet <- if (length(sheets) > 0) sheets[1] else NULL
+        if (!is.null(check_sheet)) {
+          raw <- suppressMessages(readxl::read_excel(path, sheet = check_sheet, n_max = 5))
+          measure_col <- intersect(c("MEASURE", "Measure"), names(raw))
+          if (length(measure_col) > 0) {
+            vals <- tolower(paste(raw[[measure_col[1]]], collapse = " "))
+            if (grepl("une", vals))   return("oecd_unemp")
+            if (grepl("inact", vals)) return("oecd_inact")
+            if (grepl("emp", vals))   return("oecd_emp")
+          }
+        }
+      } else if (ext == "csv") {
+        raw <- read.csv(path, nrows = 50, stringsAsFactors = FALSE)
+        measure_col <- intersect(c("MEASURE", "Measure"), names(raw))
+        if (length(measure_col) > 0) {
+          vals <- tolower(paste(unique(raw[[measure_col[1]]]), collapse = " "))
+          if (grepl("une", vals))   return("oecd_unemp")
+          if (grepl("inact", vals)) return("oecd_inact")
+          if (grepl("emp", vals))   return("oecd_emp")
+        }
+        # Fallback: scan all column names and values for keywords
+        all_text <- tolower(paste(c(names(raw), unlist(raw[1:min(5, nrow(raw)), ])), collapse = " "))
+        if (grepl("unemployment", all_text)) return("oecd_unemp")
+        if (grepl("inactivity", all_text))   return("oecd_inact")
+        if (grepl("employment", all_text))   return("oecd_emp")
+      }
+      NULL
+    }, error = function(e) NULL)
+  }
+
+  # OECD sub-type detection: try filename keywords first, then content inspection
+  .detect_oecd_type <- function(nm, path = NULL) {
     if (grepl("unemp", nm))                      return("oecd_unemp")
     if (grepl("emp", nm) && !grepl("unemp", nm)) return("oecd_emp")
     if (grepl("inact", nm))                      return("oecd_inact")
-    # default if just "oecd" with no clear metric
-    return("oecd_unemp")
+    # Filename didn't help — inspect file contents
+    if (!is.null(path)) {
+      result <- .detect_oecd_metric_from_content(path)
+      if (!is.null(result)) return(result)
+    }
+    NULL
   }
 
   # track uploads — single handler for all files
@@ -722,8 +779,9 @@ server <- function(input, output, session) {
       if (is.null(ftype)) {
         showNotification(
           paste0("Could not identify file: ", files$name[i],
-                 ". Expected A01, HR1, X09, or RTISA."),
-          type = "warning", duration = 8
+                 ". OECD files are auto-detected by content; other files need ",
+                 "recognisable names (A01, HR1, X09, RTISA)."),
+          type = "warning", duration = 10
         )
         next
       }
@@ -761,7 +819,11 @@ server <- function(input, output, session) {
         uploaded_files$oecd_inact <- files$datapath[i]
       }
 
-      detected_types <- c(detected_types, toupper(ftype))
+      .oecd_friendly <- c(oecd_unemp = "OECD Unemployment Rate",
+                          oecd_emp = "OECD Employment Rate",
+                          oecd_inact = "OECD Inactivity Rate")
+      display <- if (ftype %in% names(.oecd_friendly)) .oecd_friendly[[ftype]] else toupper(ftype)
+      detected_types <- c(detected_types, display)
     }
 
     if (length(detected_types) > 0) {
@@ -783,9 +845,10 @@ server <- function(input, output, session) {
       ftype <- .detect_file_type(files$name[i], files$datapath[i])
       if (is.null(ftype)) {
         showNotification(
-          paste0("Could not identify supplementary file: ", files$name[i],
-                 ". Expected CLA01, X02, or OECD files (name files with these prefixes)."),
-          type = "warning", duration = 8
+          paste0("Could not identify file: ", files$name[i],
+                 ". OECD files are auto-detected by content; other files need ",
+                 "recognisable names (CLA01, X02, etc.)."),
+          type = "warning", duration = 10
         )
         next
       }
@@ -809,12 +872,16 @@ server <- function(input, output, session) {
         if (ftype == "rtisa") uploaded_files$rtisa <- files$datapath[i]
       }
 
-      detected_types <- c(detected_types, toupper(ftype))
+      .oecd_friendly <- c(oecd_unemp = "OECD Unemployment Rate",
+                          oecd_emp = "OECD Employment Rate",
+                          oecd_inact = "OECD Inactivity Rate")
+      display <- if (ftype %in% names(.oecd_friendly)) .oecd_friendly[[ftype]] else toupper(ftype)
+      detected_types <- c(detected_types, display)
     }
 
     if (length(detected_types) > 0) {
       showNotification(
-        paste0("Supplementary detected: ", paste(detected_types, collapse = ", ")),
+        paste0("Detected: ", paste(detected_types, collapse = ", ")),
         type = "message", duration = 5
       )
     }
