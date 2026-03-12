@@ -167,12 +167,25 @@ generate_word_output <- function(template_path = "utils/DB.docx",
     payroll_mode <<- if (mode %in% c("latest", "aligned")) mode else "latest"
   }
 
-  # source calculations 
+  # source calculations (uses dropdown vacancies_mode for dashboard table)
   source(calculations_path, local = FALSE)
 
   if (verbose && exists("manual_month", inherits = TRUE)) message("[word_output] manual_month = ", manual_month)
-  
-  # source summary and top ten
+
+  # save dashboard vac values, then re-run vacancies with "latest" for text lines
+  saved_vac <- list(cur = vac_cur, dq = vac_dq, dy = vac_dy, dc = vac_dc, de = vac_de)
+  saved_vac_obj <- if (exists("vac", inherits = TRUE)) get("vac", inherits = TRUE) else NULL
+  saved_vac_label <- if (exists("vacancies_period_short_label", inherits = TRUE)) vacancies_period_short_label else NULL
+  tryCatch({
+    mm <- if (exists("manual_month", inherits = TRUE)) manual_month else NULL
+    vac_lat <- calculate_vacancies(mm, mode = "latest")
+    vac_cur <<- vac_lat$cur; vac_dq <<- vac_lat$dq; vac_dy <<- vac_lat$dy
+    vac_dc <<- vac_lat$dc; vac_de <<- vac_lat$de
+    vac <<- vac_lat
+    if (!is.na(vac_lat$end)) vacancies_period_short_label <<- make_lfs_label(vac_lat$end)
+  }, error = function(e) NULL)
+
+  # source summary and top ten (they now see latest vacancies)
   source(summary_path, local = FALSE)
   source(top_ten_path, local = FALSE)
   fallback_lines <- function() {
@@ -189,8 +202,14 @@ generate_word_output <- function(template_path = "utils/DB.docx",
     fallback_lines()
   })
   
+  # restore dashboard vac values (from dropdown selection) for template filling
+  vac_cur <<- saved_vac$cur; vac_dq <<- saved_vac$dq; vac_dy <<- saved_vac$dy
+  vac_dc <<- saved_vac$dc; vac_de <<- saved_vac$de
+  if (!is.null(saved_vac_obj)) vac <<- saved_vac_obj
+  if (!is.null(saved_vac_label)) vacancies_period_short_label <<- saved_vac_label
+
   doc <- read_docx(template_path)
-  
+
   title_label <- if (exists("manual_month", inherits = TRUE)) manual_month_to_label(manual_month) else ""
   doc <- replace_all(doc, "LMB__MONTH_LABEL", title_label)
   if (exists("lfs_period_label", inherits = TRUE)) doc <- replace_all(doc, "LMB__LFS_PERIOD", lfs_period_label)

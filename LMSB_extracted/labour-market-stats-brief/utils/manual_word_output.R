@@ -307,14 +307,16 @@ generate_manual_word_output <- function(
     file_oecd_inact = NULL,
     vac_end_override = NULL,
     payroll_end_override = NULL,
+    summary_override = NULL,
+    top_ten_override = NULL,
     template_path = "utils/ManualDB.docx",
     output_path   = "utils/ManualDBoutput.docx",
     verbose = TRUE
 ) {
-  
+
   if (!is.null(manual_month)) manual_month <- tolower(manual_month)
-  
-  # source helpers and run ecxel calculations (auto-detects month from A01 )
+
+  # source helpers and run excel calculations (auto-detects month from A01)
   source("utils/helpers.R", local = FALSE)
   source("utils/calculations_from_excel.R", local = FALSE)
   manual_month <- run_calculations_from_excel(manual_month,
@@ -322,27 +324,31 @@ generate_manual_word_output <- function(
                                               file_x09 = file_x09, file_rtisa = file_rtisa,
                                               vac_end_override = vac_end_override,
                                               payroll_end_override = payroll_end_override)
-  
+
   if (verbose) message("[manual] Calculations complete for ", manual_month)
-  
-  # generate summary and topten  lines
-  source("sheets/summary.R", local = FALSE)
-  source("sheets/top_ten_stats.R", local = FALSE)
-  
+
+  # generate summary and topten lines (or use pre-computed overrides)
   fallback_lines <- function() {
     stats <- list()
     for (i in 1:10) stats[[paste0("line", i)]] <- ""
     stats
   }
-  
-  summary <- tryCatch(generate_summary(), error = function(e) {
-    if (verbose) warning("generate_summary() failed: ", e$message)
-    fallback_lines()
-  })
-  top10 <- tryCatch(generate_top_ten(), error = function(e) {
-    if (verbose) warning("generate_top_ten() failed: ", e$message)
-    fallback_lines()
-  })
+
+  if (!is.null(summary_override) && !is.null(top_ten_override)) {
+    summary <- summary_override
+    top10 <- top_ten_override
+  } else {
+    source("sheets/summary.R", local = FALSE)
+    source("sheets/top_ten_stats.R", local = FALSE)
+    summary <- tryCatch(generate_summary(), error = function(e) {
+      if (verbose) warning("generate_summary() failed: ", e$message)
+      fallback_lines()
+    })
+    top10 <- tryCatch(generate_top_ten(), error = function(e) {
+      if (verbose) warning("generate_top_ten() failed: ", e$message)
+      fallback_lines()
+    })
+  }
   
   # open template
   doc <- read_docx(template_path)

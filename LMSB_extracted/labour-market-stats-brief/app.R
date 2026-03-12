@@ -1485,7 +1485,7 @@ server <- function(input, output, session) {
             summary_path = summary_path,
             top_ten_path = top_ten_path,
             manual_month_override = month_override,
-            vacancies_mode_override = "latest",
+            vacancies_mode_override = vac_mode,
             payroll_mode_override = pay_mode
           )
         })
@@ -1775,7 +1775,10 @@ server <- function(input, output, session) {
               file_oecd_unemp = uploaded_files$oecd_unemp,
               file_oecd_emp   = uploaded_files$oecd_emp,
               file_oecd_inact = uploaded_files$oecd_inact,
+              vac_end_override = .parse_period_end(input$manual_vacancies_period),
               payroll_end_override = .parse_period_end(input$manual_payroll_period),
+              summary_override = summary_lines,
+              top_ten_override = top10_lines,
               template_path = manual_template,
               output_path = file,
               verbose = FALSE
