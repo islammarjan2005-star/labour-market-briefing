@@ -402,8 +402,6 @@ run_calculations_from_excel <- function(manual_month = NULL,
 
   tbl_19 <- if (!is.null(file_a01)) .read_sheet(file_a01, "19") else data.frame()
 
-  # Vacancies: always use the latest available period in Sheet 19 for lines/output.
-  # The dropdown override only affects the dashboard preview (handled in app.R).
   vac_lab_covid <- "Jan-Mar 2020"
   vac_lab_elec  <- .lfs_label(as.Date("2024-06-01"))  # "Apr-Jun 2024"
 
@@ -422,8 +420,18 @@ run_calculations_from_excel <- function(manual_month = NULL,
     }, numeric(1))
     valid_vac <- which(!is.na(vac_dates) & !is.na(suppressWarnings(as.numeric(gsub("[^0-9.-]", "", as.character(tbl_19[[3]]))))))
     if (length(valid_vac) > 0) {
-      latest_idx <- valid_vac[which.max(vac_dates[valid_vac])]
-      vac_end <- as.Date(vac_dates[latest_idx], origin = "1970-01-01")
+      if (!is.null(vac_end_override)) {
+        override_idx <- valid_vac[which(as.Date(vac_dates[valid_vac], origin = "1970-01-01") == vac_end_override)]
+        if (length(override_idx) >= 1) {
+          vac_end <- vac_end_override
+        } else {
+          latest_idx <- valid_vac[which.max(vac_dates[valid_vac])]
+          vac_end <- as.Date(vac_dates[latest_idx], origin = "1970-01-01")
+        }
+      } else {
+        latest_idx <- valid_vac[which.max(vac_dates[valid_vac])]
+        vac_end <- as.Date(vac_dates[latest_idx], origin = "1970-01-01")
+      }
     } else {
       vac_end <- if (!is.null(vac_end_override)) vac_end_override else lfs_end_cur
     }
