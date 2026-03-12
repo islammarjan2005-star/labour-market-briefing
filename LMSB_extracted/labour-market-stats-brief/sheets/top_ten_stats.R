@@ -104,7 +104,8 @@ generate_top_ten <- function() {
   } else NA_real_
 
   #  direction words
-  pub_priv_dir <- ifelse(!is.na(pub_priv_diff_reg) && pub_priv_diff_reg >= 0, "higher", "lower")
+  pub_priv_dir_total <- ifelse(!is.na(pub_priv_diff_total) && pub_priv_diff_total >= 0, "higher", "lower")
+  pub_priv_dir_reg <- ifelse(!is.na(pub_priv_diff_reg) && pub_priv_diff_reg >= 0, "higher", "lower")
   wages_cpi_total_dir <- ifelse(!is.na(latest_wages_cpi) && latest_wages_cpi >= 0, "grew by", "fell by")
   wages_cpi_reg_dir <- ifelse(!is.na(latest_regular_cpi) && latest_regular_cpi >= 0, "grew by", "fell by")
   vs_dec2007_dir <- ifelse(!is.na(wages_cpi_total_vs_dec2007) && wages_cpi_total_vs_dec2007 >= 0, "higher", "lower")
@@ -117,8 +118,9 @@ generate_top_ten <- function() {
   line1 <- glue(
     'Annual growth in employees\' average earnings was {fmt_pct(latest_wages)} for total pay ',
     '(including bonuses) and {fmt_pct(latest_regular_cash)} for regular pay (excluding bonuses) ',
-    'in {lfs_period_label}. Public sector changes of {fmt_pct(wages_total_public)} and ',
-    '{fmt_pct(wages_reg_public)} respectively are {fmt_one_dec(abs(pub_priv_diff_reg))}pp {pub_priv_dir} than the private sector. ',
+    'in {lfs_period_label}. Public sector total pay growth of {fmt_pct(wages_total_public)} is ',
+    '{fmt_one_dec(abs(pub_priv_diff_total))}pp {pub_priv_dir_total} than the private sector, ',
+    'and regular pay growth of {fmt_pct(wages_reg_public)} is {fmt_one_dec(abs(pub_priv_diff_reg))}pp {pub_priv_dir_reg} than the private sector. ',
     'Wage growth is {ifelse(is.na(wages_total_qchange) || wages_total_qchange < 0, "easing", "accelerating")}, with this representing a quarterly ',
     '{ifelse(is.na(wages_total_qchange) || wages_total_qchange >= 0, "increase", "decline")} of {fmt_one_dec(abs(wages_total_qchange))}pp ',
     'and a quarterly {ifelse(is.na(wages_reg_qchange) || wages_reg_qchange >= 0, "increase", "decline")} of {fmt_one_dec(abs(wages_reg_qchange))}pp respectively.',
@@ -175,8 +177,8 @@ generate_top_ten <- function() {
   # line 5: inactivity rate
   line5 <- glue(
     'The 16-64s economic inactivity rate was {fmt_rate(inact_rt_cur)}% ',
-    'in {lfs_period_label}, {fmt_dir(inact_rt_dy, "down", "up")} {fmt_pp(inact_rt_dy)} ',
-    'from a year ago, and {fmt_dir(inact_rt_dq, "down", "up")} {fmt_pp(inact_rt_dq)} ',
+    'in {lfs_period_label}, {fmt_dir(inact_rt_dy, "up", "down")} {fmt_pp(inact_rt_dy)} ',
+    'from a year ago, and {fmt_dir(inact_rt_dq, "up", "down")} {fmt_pp(inact_rt_dq)} ',
     'from the previous quarter. The inactivity rate is ',
     '{fmt_pp(inact_rt_dc)} {inact_rt_covid_dir} than before the pandemic.',
     .comment = ""
