@@ -2108,7 +2108,138 @@ create_audit_workbook <- function(
   }
   setColWidths(wb, "Dashboard", cols = 1:6, widths = c(35, 15, 20, 18, 22, 22))
   
-  # (Charts removed per user request)
+  # ==========================================================================
+  # STEP 4b: Generate chart sheets (ggplot2 images)
+  # ==========================================================================
+
+  if (requireNamespace("ggplot2", quietly = TRUE)) {
+    library(ggplot2)
+
+    .govuk_theme <- function() {
+      theme_minimal(base_family = "sans", base_size = 11) +
+        theme(
+          plot.title = element_text(face = "bold", size = 14, colour = "#1F4E79"),
+          plot.subtitle = element_text(size = 10, colour = "#505050"),
+          plot.caption = element_text(size = 8, colour = "#707070", hjust = 0),
+          panel.grid.minor = element_blank(),
+          legend.position = "bottom",
+          axis.title = element_text(size = 10),
+          plot.margin = margin(10, 15, 10, 10)
+        )
+    }
+
+    .insert_chart <- function(wb, sheet_name, plot_obj, title, tab_col = "#B4C6E7",
+                               width = 22, height = 13) {
+      addWorksheet(wb, sheet_name, tabColour = tab_col)
+      writeData(wb, sheet_name, title, startRow = 1, startCol = 1)
+      addStyle(wb, sheet_name, .ts(), rows = 1, cols = 1)
+      tmp_png <- tempfile(fileext = ".png")
+      tryCatch({
+        ggsave(tmp_png, plot = plot_obj, width = width, height = height,
+               units = "cm", dpi = 200, bg = "white")
+        insertImage(wb, sheet_name, tmp_png, startRow = 3, startCol = 1,
+                    width = width, height = height, units = "cm")
+      }, error = function(e) {
+        writeData(wb, sheet_name, paste("Chart generation failed:", e$message),
+                  startRow = 3, startCol = 1)
+      })
+      tryCatch(file.remove(tmp_png), error = function(e) NULL)
+    }
+
+    # --- Figure 1: Unemployment Rate (16+, Seasonally Adjusted) ---
+    if (exists("tbl_2_full") && nrow(tbl_2_full) > 0 && ncol(tbl_2_full) >= 5) {
+      s2_labels <- trimws(as.character(tbl_2_full[[1]]))
+      lfs_pat <- "^(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)-(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\\s+(\\d{4})$"
+      s2_lfs <- grep(lfs_pat, s2_labels)
+      if (length(s2_lfs) > 10) {
+        s2_dates <- vapply(s2_lfs, function(idx) {
+          parts <- regmatches(s2_labels[idx], regexec(lfs_pat, s2_labels[idx]))[[1]]
+          end_mon <- match(tools::toTitleCase(tolower(parts[3])), month.abb)
+          end_yr <- as.integer(parts[4])
+          if (!is.na(end_mon) && !is.na(end_yr)) as.Date(sprintf("%04d-%02d-01", end_yr, end_mon))
+          else NA_real_
+        }, numeric(1))
+        s2_dates <- as.Date(s2_dates, origin = "1970-01-01")
+        unemp_rate <- suppressWarnings(as.numeric(as.character(tbl_2_full[[5]][s2_lfs])))
+
+        unemp_df <- data.frame(Date = s2_dates, Rate = unemp_rate, stringsAsFactors = FALSE)
+        unemp_df <- unemp_df[!is.na(unemp_df$Date) & !is.na(unemp_df$Rate), ]
+        unemp_df <- unemp_df[unemp_df$Date >= as.Date("2010-01-01"), ]
+
+        if (nrow(unemp_df) > 0) {
+          # Find key annotation points: peak, trough, and latest value
+          ann_pts <- data.frame(Date = numeric(0), Rate = numeric(0), stringsAsFactors = FALSE)
+          # Peak
+          peak_idx <- which.max(unemp_df$Rate)
+          ann_pts <- rbind(ann_pts, unemp_df[peak_idx, ])
+          # Latest
+          latest_idx <- nrow(unemp_df)
+          ann_pts <- rbind(ann_pts, unemp_df[latest_idx, ])
+          # Local minimum (trough) after peak
+          after_peak <- unemp_df[(peak_idx + 1):nrow(unemp_df), ]
+          if (nrow(after_peak) > 5) {
+            trough_idx <- peak_idx + which.min(after_peak$Rate)
+            ann_pts <- rbind(ann_pts, unemp_df[trough_idx, ])
+          }
+          ann_pts <- ann_pts[!duplicated(ann_pts$Date), ]
+
+          p_unemp <- ggplot(unemp_df, aes(x = Date, y = Rate)) +
+            geom_line(colour = "#1F4E79", linewidth = 0.8) +
+            geom_text(data = ann_pts, aes(label = sprintf("%.1f", Rate)),
+                      vjust = -1, size = 3.5, colour = "#1F4E79") +
+            labs(title = "Figure 1: Unemployment rate (16+, Seasonally Adjusted)",
+                 x = NULL, y = "Percent",
+                 caption = "Source: ONS Labour Force Survey") +
+            .govuk_theme() +
+            theme(legend.position = "none")
+          .insert_chart(wb, "Fig 1 Unemployment Rate", p_unemp,
+                        "Figure 1: Unemployment rate (16+, Seasonally Adjusted)", "#4472C4")
+        }
+      }
+    }
+
+    # --- Figure 2: Annual Change in Payrolled Employees (bar chart) ---
+    if (exists("pay_df") && nrow(pay_df) > 0) {
+      pay_annual <- pay_df[order(pay_df$m), ]
+      pay_annual$change <- NA_real_
+      for (i in seq_len(nrow(pay_annual))) {
+        target <- pay_annual$m[i] %m-% months(12)
+        j <- which(pay_annual$m == target)
+        if (length(j) > 0) {
+          pay_annual$change[i] <- (pay_annual$v[i] - pay_annual$v[j[1]]) / 1000
+        }
+      }
+      pay_annual <- pay_annual[!is.na(pay_annual$change), ]
+      pay_annual <- pay_annual[pay_annual$m >= as.Date("2019-01-01"), ]
+
+      if (nrow(pay_annual) > 0) {
+        pay_annual$fill <- ifelse(pay_annual$change >= 0, "#1F4E79", "#C00060")
+
+        p_pay_change <- ggplot(pay_annual, aes(x = m, y = change, fill = fill)) +
+          geom_col(width = 25) +
+          scale_fill_identity() +
+          geom_hline(yintercept = 0, colour = "black", linewidth = 0.3) +
+          scale_y_continuous(labels = scales::comma) +
+          scale_x_date(date_labels = "%b\n%y", date_breaks = "1 year") +
+          labs(title = "Figure 2: Annual Change in Payrolled Employees",
+               x = NULL, y = NULL,
+               caption = "Source: ONS Labour Force Survey") +
+          .govuk_theme() +
+          theme(legend.position = "none")
+        .insert_chart(wb, "Fig 2 Payroll Annual Change", p_pay_change,
+                      "Figure 2: Annual Change in Payrolled Employees", "#548235")
+      }
+    }
+
+  } else {
+    # ggplot2 not available — create placeholder chart sheets
+    for (ch_name in c("Fig 1 Unemployment Rate", "Fig 2 Payroll Annual Change")) {
+      if (!ch_name %in% names(wb)) {
+        addWorksheet(wb, ch_name, tabColour = "#B4C6E7")
+        writeData(wb, ch_name, data.frame(Note = "Install ggplot2 package to generate charts automatically."))
+      }
+    }
+  }
   
   # --- Separator sheets ---
   for (sep_name in c("Redundancies >>>", "Labour market flows >>>",
@@ -2172,6 +2303,7 @@ create_audit_workbook <- function(
   
   desired_order <- c(
     "How to update", "Data links", "Dashboard",
+    "Fig 1 Unemployment Rate", "Fig 2 Payroll Annual Change",
     "1. Payrolled employees (UK)", "23. Employees Industry",
     "2", "5", "10", "11", "13", "15", "18", "19", "21", "20", "22",
     "1 UK", "AWE Real_CPI",
