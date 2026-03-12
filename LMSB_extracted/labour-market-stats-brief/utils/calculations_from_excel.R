@@ -402,6 +402,8 @@ run_calculations_from_excel <- function(manual_month = NULL,
 
   tbl_19 <- if (!is.null(file_a01)) .read_sheet(file_a01, "19") else data.frame()
 
+  # Vacancies: vac_end_override controls which period is used.
+  # Only dashboard preview passes it; all other outputs use latest (NULL).
   vac_lab_covid <- "Jan-Mar 2020"
   vac_lab_elec  <- .lfs_label(as.Date("2024-06-01"))  # "Apr-Jun 2024"
 

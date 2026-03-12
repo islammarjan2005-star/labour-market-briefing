@@ -1394,7 +1394,7 @@ server <- function(input, output, session) {
       
       # vacancies & payroll choices
       labs <- period_labels()
-      vacancies_mode <<- mode_from_choice(input$vacancies_period, labs$vac)
+      vacancies_mode <<- "latest"
       payroll_mode <<- mode_from_choice(input$payroll_period, labs$payroll)
       
       incProgress(0.2, detail = "Step 4/6: Running calculations...")
@@ -1485,7 +1485,7 @@ server <- function(input, output, session) {
             summary_path = summary_path,
             top_ten_path = top_ten_path,
             manual_month_override = month_override,
-            vacancies_mode_override = vac_mode,
+            vacancies_mode_override = "latest",
             payroll_mode_override = pay_mode
           )
         })
@@ -1555,7 +1555,7 @@ server <- function(input, output, session) {
             file_oecd_inact = uploaded_files$oecd_inact,
             calculations_path = calculations_path,
             config_path = config_path,
-            vacancies_mode = vac_mode,
+            vacancies_mode = "latest",
             payroll_mode = pay_mode,
             manual_month_override = month_override,
             verbose = FALSE
@@ -1688,13 +1688,12 @@ server <- function(input, output, session) {
         manual_month = NULL,
         file_a01 = uploaded_files$a01, file_hr1 = uploaded_files$hr1,
         file_x09 = uploaded_files$x09, file_rtisa = uploaded_files$rtisa,
-        vac_end_override = .parse_period_end(input$manual_vacancies_period),
         payroll_end_override = .parse_period_end(input$manual_payroll_period),
         target_env = globalenv()
       )
       manual_month <<- detected_mm
       .update_ref_month(detected_mm)
-      
+
       incProgress(0.5, detail = "Generating top ten stats...")
       
       source(top_ten_path, local = FALSE)
@@ -1744,13 +1743,12 @@ server <- function(input, output, session) {
             manual_month = NULL,
             file_a01 = uploaded_files$a01, file_hr1 = uploaded_files$hr1,
             file_x09 = uploaded_files$x09, file_rtisa = uploaded_files$rtisa,
-            vac_end_override = .parse_period_end(input$manual_vacancies_period),
             payroll_end_override = .parse_period_end(input$manual_payroll_period),
             target_env = globalenv()
           )
           manual_month <<- detected_mm
           .update_ref_month(detected_mm)
-          
+
           incProgress(0.2, detail = "Generating summary & top ten...")
           
           source(summary_path, local = FALSE)
@@ -1777,7 +1775,6 @@ server <- function(input, output, session) {
               file_oecd_unemp = uploaded_files$oecd_unemp,
               file_oecd_emp   = uploaded_files$oecd_emp,
               file_oecd_inact = uploaded_files$oecd_inact,
-              vac_end_override = .parse_period_end(input$manual_vacancies_period),
               payroll_end_override = .parse_period_end(input$manual_payroll_period),
               template_path = manual_template,
               output_path = file,
@@ -1848,7 +1845,6 @@ server <- function(input, output, session) {
             manual_month = NULL,
             file_a01 = uploaded_files$a01, file_hr1 = uploaded_files$hr1,
             file_x09 = uploaded_files$x09, file_rtisa = uploaded_files$rtisa,
-            vac_end_override = .parse_period_end(input$manual_vacancies_period),
             payroll_end_override = .parse_period_end(input$manual_payroll_period),
             target_env = globalenv()
           )
