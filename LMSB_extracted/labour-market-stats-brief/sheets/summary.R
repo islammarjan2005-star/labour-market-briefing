@@ -17,20 +17,20 @@ if (!exists("fmt_pct", inherits = TRUE)) {
 fmt_signed_int <- function(x) {
   if (is.na(x)) return("—")
   s <- if (x > 0) "+" else if (x < 0) "-" else ""
-  paste0(s, format(round(abs(x), 0), big.mark = ","))
+  paste0(s, format(round(abs(x), 0), big.mark = ",", scientific = FALSE))
 }
 
 # format integer with commas (absolute)
 fmt_int_1k <- function(x) {
   if (is.na(x)) return("\u2014")
-  format(round(abs(x)), big.mark = ",")
+  format(round(abs(x)), big.mark = ",", scientific = FALSE)
 }
 
 # format integer with commas (signed)
 fmt_signed_int_1k <- function(x) {
   if (is.na(x)) return("\u2014")
   s <- if (x > 0) "+" else if (x < 0) "-" else ""
-  paste0(s, format(round(abs(x)), big.mark = ","))
+  paste0(s, format(round(abs(x)), big.mark = ",", scientific = FALSE))
 }
 
 fmt_signed_pp <- function(x) {

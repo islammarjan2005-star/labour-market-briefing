@@ -137,6 +137,28 @@ sv <- function(name, default = NA_real_) {
   if (exists(name, inherits = TRUE)) get(name, inherits = TRUE) else default
 }
 
+# Insert a line break + subtitle text below a row label in the Word table
+.add_period_subtitle <- function(doc, search_text, subtitle_text) {
+  if (is.null(subtitle_text) || !nzchar(subtitle_text)) return(doc)
+  body_xml <- doc$doc_obj$get()
+  ns <- xml2::xml_ns(body_xml)
+  w_ns <- "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+  text_nodes <- xml2::xml_find_all(body_xml, ".//w:t", ns = ns)
+  for (node in text_nodes) {
+    txt <- xml2::xml_text(node)
+    if (grepl(search_text, txt, fixed = TRUE)) {
+      run_node <- xml2::xml_parent(node)
+      # Add line break + subtitle text within the same run
+      xml2::xml_add_child(run_node, paste0("{", w_ns, "}br"))
+      sub_t <- xml2::xml_add_child(run_node, paste0("{", w_ns, "}t"))
+      xml2::xml_text(sub_t) <- subtitle_text
+      xml2::xml_attr(sub_t, "xml:space") <- "preserve"
+      break
+    }
+  }
+  doc
+}
+
 # OECD data
 
 # target countries
@@ -435,7 +457,13 @@ generate_manual_word_output <- function(
   doc <- fill_conditional(doc, "qvzwnode",  .format_gbp_signed0(sv("wages_change_election")),     sv("wages_change_election"))
   doc <- fill_conditional(doc, "qvzwcpde",  .format_gbp_signed0(sv("wages_cpi_change_election")), sv("wages_cpi_change_election"))
   
-  # The OECD page is already in ManualDB.docx 
+  # Add period subtitles under Vacancies and Payroll row labels
+  vac_period <- sv("vacancies_period_short_label", "")
+  pay_period <- sv("payroll_period_short_label", "")
+  if (nzchar(vac_period)) doc <- .add_period_subtitle(doc, "Vacancies", paste0("3-month avg. (", vac_period, ")"))
+  if (nzchar(pay_period)) doc <- .add_period_subtitle(doc, "Payroll", paste0("3-month avg. (", pay_period, ")"))
+
+  # The OECD page is already in ManualDB.docx
   oecd_unemp_data <- tryCatch(.read_oecd_latest(file_oecd_unemp), error = function(e) NULL)
   oecd_emp_data   <- tryCatch(.read_oecd_latest(file_oecd_emp),   error = function(e) NULL)
   oecd_inact_data <- tryCatch(.read_oecd_latest(file_oecd_inact), error = function(e) NULL)

@@ -674,6 +674,7 @@ run_calculations_from_excel <- function(manual_month = NULL,
   assign("vacancies_period_short_label", vacancies_period_short_label, envir = target_env)
   assign("payroll_flash_label",          payroll_flash_label_val,      envir = target_env)
   assign("payroll_month_label",          format(anchor_m, "%B %Y"),    envir = target_env)
+  assign("payroll_period_short_label",  make_lfs_label(anchor_m),     envir = target_env)
   assign("hr1_month_label",             hr1_month_label,              envir = target_env)
   assign("sector_month_label",          sector_month_label,           envir = target_env)
   assign("manual_month",                manual_month,                 envir = target_env)

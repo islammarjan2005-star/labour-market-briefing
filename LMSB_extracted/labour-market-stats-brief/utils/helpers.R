@@ -150,7 +150,7 @@ format_int <- function(x) {
   v <- round(as.numeric(x), 0)
   if (is.na(v)) return(NA_character_)
   if (v == 0) return("0")
-  paste0(ifelse(v > 0, "+", "-"), format(abs(v), big.mark = ","))
+  paste0(ifelse(v > 0, "+", "-"), format(abs(v), big.mark = ",", scientific = FALSE))
 }
 
 format_pp <- function(x) {
@@ -182,7 +182,7 @@ format_gbp_signed0 <- function(x) {
   v <- round(as.numeric(x), 0)
   if (is.na(v)) return(NA_character_)
   if (v == 0) return("\u00A30")
-  paste0(ifelse(v > 0, "+\u00A3", "-\u00A3"), format(abs(v), big.mark = ","))
+  paste0(ifelse(v > 0, "+\u00A3", "-\u00A3"), format(abs(v), big.mark = ",", scientific = FALSE))
 }
 
 # unsigned formatting functions
@@ -191,7 +191,7 @@ format_int_unsigned <- function(x) {
   if (is.na(x)) return(NA_character_)
   v <- round(abs(as.numeric(x)), 0)
   if (is.na(v)) return(NA_character_)
-  format(v, big.mark = ",")
+  format(v, big.mark = ",", scientific = FALSE)
 }
 
 format_pct1_unsigned <- function(x) {

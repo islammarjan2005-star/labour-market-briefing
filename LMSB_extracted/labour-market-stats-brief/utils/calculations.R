@@ -282,6 +282,10 @@ payroll_month_label <- if (!is.null(payroll) && !is.null(payroll$anchor) && !is.
   format(payroll$anchor, "%B %Y")
 } else ""
 
+payroll_period_short_label <- if (!is.null(payroll) && !is.null(payroll$anchor) && !is.na(payroll$anchor)) {
+  make_lfs_label(payroll$anchor)
+} else ""
+
 payroll_flash_label <- if (!is.null(payroll) && !is.null(payroll$flash_anchor) && !is.na(payroll$flash_anchor)) {
   format(payroll$flash_anchor, "%B %Y")
 } else ""

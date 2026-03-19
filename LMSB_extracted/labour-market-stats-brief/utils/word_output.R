@@ -108,6 +108,27 @@ replace_all <- function(doc, key, val) {
   doc
 }
 
+# Insert a line break + subtitle text below a row label in the Word table
+.add_period_subtitle <- function(doc, search_text, subtitle_text) {
+  if (is.null(subtitle_text) || !nzchar(subtitle_text)) return(doc)
+  body_xml <- doc$doc_obj$get()
+  ns <- xml2::xml_ns(body_xml)
+  w_ns <- "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+  text_nodes <- xml2::xml_find_all(body_xml, ".//w:t", ns = ns)
+  for (node in text_nodes) {
+    txt <- xml2::xml_text(node)
+    if (grepl(search_text, txt, fixed = TRUE)) {
+      run_node <- xml2::xml_parent(node)
+      xml2::xml_add_child(run_node, paste0("{", w_ns, "}br"))
+      sub_t <- xml2::xml_add_child(run_node, paste0("{", w_ns, "}t"))
+      xml2::xml_text(sub_t) <- subtitle_text
+      xml2::xml_attr(sub_t, "xml:space") <- "preserve"
+      break
+    }
+  }
+  doc
+}
+
 fill_conditional <- function(doc, base, value_text, value_num, invert = FALSE, neutral = FALSE) {
   value_num <- suppressWarnings(as.numeric(value_num))
   if (is.na(value_num)) value_num <- 0
@@ -311,8 +332,12 @@ generate_word_output <- function(template_path = "utils/DB.docx",
       doc <- fill_conditional(doc, "LMB__WAGECPI_DE", .format_gbp_signed0(wages_cpi_change_election), wages_cpi_change_election, invert = FALSE)
     }
   }
-  
 
+  # Add period subtitles under Vacancies and Payroll row labels
+  vac_period <- if (exists("vacancies_period_short_label", inherits = TRUE)) vacancies_period_short_label else ""
+  pay_period <- if (exists("payroll_period_short_label", inherits = TRUE)) payroll_period_short_label else ""
+  if (nzchar(vac_period)) doc <- .add_period_subtitle(doc, "Vacancies", paste0("3-month avg. (", vac_period, ")"))
+  if (nzchar(pay_period)) doc <- .add_period_subtitle(doc, "Payroll", paste0("3-month avg. (", pay_period, ")"))
 
   # workforce jobs
   wfj_period <- if (exists("workforce_jobs", inherits = TRUE)) workforce_jobs$period else ""

@@ -19,14 +19,14 @@ dir_word <- function(x) {
 # format number rounded to nearest 1,000
 fmt_int_1k <- function(x) {
   if (is.na(x)) return("\u2014")
-  format(round(abs(x), -3), big.mark = ",")
+  format(round(abs(x), -3), big.mark = ",", scientific = FALSE)
 }
 
 # format flash change (rounded to nearest 1,000)
 fmt_flash_change <- function(x) {
   if (is.na(x)) return("\u2014")
   full_val <- round(x * 1000, -3)
-  format(abs(full_val), big.mark = ",")
+  format(abs(full_val), big.mark = ",", scientific = FALSE)
 }
 
 # format rate (NA-safe wrapper for format(round(x,1)))
