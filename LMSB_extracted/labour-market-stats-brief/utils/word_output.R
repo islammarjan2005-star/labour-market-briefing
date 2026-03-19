@@ -119,10 +119,14 @@ replace_all <- function(doc, key, val) {
     txt <- xml2::xml_text(node)
     if (grepl(search_text, txt, fixed = TRUE)) {
       run_node <- xml2::xml_parent(node)
-      xml2::xml_add_child(run_node, paste0("{", w_ns, "}br"))
-      sub_t <- xml2::xml_add_child(run_node, paste0("{", w_ns, "}t"))
-      xml2::xml_text(sub_t) <- subtitle_text
-      xml2::xml_attr(sub_t, "xml:space") <- "preserve"
+      # Add line break + subtitle text as parsed XML fragments
+      br_frag <- xml2::read_xml(paste0('<w:br xmlns:w="', w_ns, '"/>'))
+      xml2::xml_add_child(run_node, br_frag)
+      t_frag <- xml2::read_xml(sprintf(
+        '<w:t xmlns:w="%s" xml:space="preserve">%s</w:t>',
+        w_ns, subtitle_text
+      ))
+      xml2::xml_add_child(run_node, t_frag)
       break
     }
   }
