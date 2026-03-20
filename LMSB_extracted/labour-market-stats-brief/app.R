@@ -432,35 +432,30 @@ ui <- fluidPage(
         box-shadow: inset 0 0 0 2px;
       }
 
-      /* Two-column mode layout */
-      .mode-row {
-        display: flex;
-        gap: 20px;
-        margin-bottom: 20px;
+      /* GOV.UK-style tabs */
+      .nav-pills { display: flex; list-style: none; margin: 0 0 20px 0; padding: 0; border-bottom: 2px solid #b1b4b6; }
+      .nav-pills > li { margin: 0; }
+      .nav-pills > li > a {
+        display: block; padding: 10px 20px; font-size: 19px; font-weight: 700;
+        color: #1d70b8; text-decoration: none; border-bottom: 4px solid transparent; margin-bottom: -2px;
+        background: none; border-radius: 0;
       }
-      .mode-col {
-        flex: 1;
-        min-width: 0;
+      .nav-pills > li.active > a, .nav-pills > li.active > a:hover, .nav-pills > li.active > a:focus {
+        color: #0b0c0c; background: none; border-bottom-color: #1d70b8;
       }
-      .mode-col .dashboard-card {
-        height: 100%;
-        display: flex;
-        flex-direction: column;
+      .nav-pills > li > a:hover { color: #003078; background: none; }
+
+      .govuk-tag--grey { background-color: #b1b4b6; color: #ffffff; }
+      .govuk-tag--amber { background-color: #f47738; }
+
+      /* Period toggle buttons */
+      .period-toggle-group { display: inline-flex; border: 2px solid #0b0c0c; margin-right: 20px; margin-bottom: 15px; }
+      .period-toggle-group .govuk-button {
+        margin: 0; box-shadow: none; border: none; border-right: 1px solid #b1b4b6; border-radius: 0;
       }
-      .mode-col .dashboard-card__content {
-        flex: 1;
-      }
-      .mode-col--manual {
-        border-left: 3px solid #b1b4b6;
-        padding-left: 20px;
-      }
-      .govuk-tag--amber {
-        background-color: #f47738;
-      }
-      @media (max-width: 768px) {
-        .mode-row { flex-direction: column; }
-        .mode-col--manual { border-left: none; padding-left: 0; border-top: 3px solid #b1b4b6; padding-top: 20px; }
-      }
+      .period-toggle-group .govuk-button:last-child { border-right: none; }
+      .period-toggle-group .govuk-button.active { background-color: #1d70b8; color: #ffffff; }
+      .period-toggle-group .govuk-button:not(.active) { background-color: #f3f2f1; color: #0b0c0c; box-shadow: none; }
     "))
   ),
   
@@ -488,21 +483,70 @@ ui <- fluidPage(
                 
                 h1(class = "govuk-heading-xl", "Labour Market Statistics Brief Generator"),
                 
-                # two-column layout: auto (left) vs manual (right)
-                div(class = "mode-row",
-                    
-                    # ---- LEFT COLUMN: Automatic (Database) ----
-                    div(class = "mode-col",
-                        div(class = "dashboard-card",
+                # tabbed layout: Manual (default) | Automatic
+                tabsetPanel(id = "mode_tabs", type = "pills", selected = "manual",
+
+                    # ---- MANUAL TAB ----
+                    tabPanel("Manual", value = "manual",
+                        div(class = "dashboard-card", style = "margin-top: 20px;",
+                            div(class = "dashboard-card__header", "Manual (Excel Upload)"),
+                            div(class = "dashboard-card__content",
+
+                                # --- Upload ---
+                                div(class = "govuk-form-group",
+                                    fileInput("upload_files", "Upload ONS Excel files",
+                                              accept = c(".xlsx", ".csv"), multiple = TRUE, width = "100%"),
+                                    div(class = "govuk-hint",
+                                        "Drag or select files. Auto-detected by name: A01, HR1, X09, RTISA, CLA01, X02, OECD.")
+                                ),
+
+                                # --- File status (all 9 types) ---
+                                uiOutput("upload_status"),
+
+                                tags$hr(class = "govuk-section-break"),
+
+                                # --- Period buttons ---
+                                h2(class = "govuk-heading-m", "Period selection"),
+                                div(
+                                    tags$label(class = "govuk-label", style = "font-weight:700;", "Vacancies"),
+                                    uiOutput("manual_vac_period_buttons")
+                                ),
+                                div(
+                                    tags$label(class = "govuk-label", style = "font-weight:700;", "Payroll employees"),
+                                    uiOutput("manual_pay_period_buttons")
+                                ),
+
+                                tags$hr(class = "govuk-section-break"),
+
+                                # --- Preview buttons ---
+                                h2(class = "govuk-heading-m", "Preview"),
+                                actionButton("manual_preview_dashboard", "Dashboard", class = "govuk-button govuk-button--blue"),
+                                actionButton("manual_preview_topten", "Top Ten", class = "govuk-button govuk-button--blue"),
+                                actionButton("manual_preview_summary", "Summary", class = "govuk-button govuk-button--blue"),
+                                actionButton("manual_preview_oecd", "OECD", class = "govuk-button govuk-button--blue"),
+
+                                tags$hr(class = "govuk-section-break"),
+
+                                # --- Download buttons ---
+                                h2(class = "govuk-heading-m", "Download"),
+                                downloadButton("manual_download_word", "Download Word", class = "govuk-button govuk-button--blue"),
+                                downloadButton("manual_download_excel", "Download Excel", class = "govuk-button")
+                            )
+                        )
+                    ),
+
+                    # ---- AUTOMATIC TAB ----
+                    tabPanel("Automatic", value = "automatic",
+                        div(class = "dashboard-card", style = "margin-top: 20px;",
                             div(class = "dashboard-card__header", "Automatic (Database)"),
                             div(class = "dashboard-card__content",
-                                
+
                                 div(class = "govuk-form-group",
                                     tags$label(class = "govuk-label", "Reference month"),
                                     div(class = "govuk-hint", "Auto-selected from latest available data"),
                                     uiOutput("month_status")
                                 ),
-                                
+
                                 div(class = "input-row",
                                     div(class = "govuk-form-group",
                                         tags$label(class = "govuk-label", `for` = "vacancies_period", "Vacancies"),
@@ -513,86 +557,18 @@ ui <- fluidPage(
                                         selectInput("payroll_period", label = NULL, choices = c("Loading" = "Loading"), selected = "Loading")
                                     )
                                 ),
-                                
+
                                 tags$hr(class = "govuk-section-break"),
-                                
+
                                 h2(class = "govuk-heading-m", "Preview"),
                                 actionButton("preview_dashboard", "Preview Dashboard", class = "govuk-button govuk-button--blue"),
                                 actionButton("preview_topten", "Preview Top Ten Stats", class = "govuk-button govuk-button--blue"),
-                                
+
                                 tags$hr(class = "govuk-section-break"),
-                                
+
                                 h2(class = "govuk-heading-m", "Download"),
-                                downloadButton("download_word", "Download Word", class = "govuk-button"),
-                                downloadButton("download_excel", "Download Excel", class = "govuk-button govuk-button--secondary")
-                            )
-                        )
-                    ),
-                    
-                    # ---- RIGHT COLUMN: Manual (Excel Upload) ----
-                    div(class = "mode-col mode-col--manual",
-                        div(class = "dashboard-card",
-                            div(class = "dashboard-card__header", "Manual (Excel Upload)"),
-                            div(class = "dashboard-card__content",
-                                
-                                p(class = "govuk-body", "Upload ONS Excel files to generate from local data. A01 is required; others are optional."),
-                                tags$ul(class = "govuk-list",
-                                        tags$li(tags$a(href = "https://www.ons.gov.uk/employmentandlabourmarket/peopleinwork/employmentandemployeetypes/datasets/summaryoflabourmarketstatistics/current",
-                                                       target = "_blank", "A01: Summary of labour market statistics")),
-                                        tags$li(tags$a(href = "https://www.ons.gov.uk/employmentandlabourmarket/peopleinwork/employmentandemployeetypes/datasets/hr1potentialredundancies",
-                                                       target = "_blank", "HR1: Potential redundancies")),
-                                        tags$li(tags$a(href = "https://www.ons.gov.uk/employmentandlabourmarket/peopleinwork/earningsandworkinghours/datasets/x09realaverageweeklyearningsusingconsumerpriceinflationseasonallyadjusted",
-                                                       target = "_blank", "X09: Real average weekly earnings (CPI)")),
-                                        tags$li(tags$a(href = "https://www.ons.gov.uk/employmentandlabourmarket/peopleinwork/earningsandworkinghours/datasets/realtimeinformationstatisticsreferencetableseasonallyadjusted",
-                                                       target = "_blank", "RTISA: Payrolled employees (SA)"))
-                                ),
-                                
-                                div(class = "govuk-form-group",
-                                    fileInput("upload_files", "Upload core Excel files (.xlsx)",
-                                              accept = ".xlsx", multiple = TRUE, width = "100%"),
-                                    div(class = "govuk-hint",
-                                        "Select up to 4 files at once. Files are auto-detected by name (e.g. a01, hr1, x09, rtisa).")
-                                ),
-                                
-                                uiOutput("upload_status"),
-                                
-                                div(class = "input-row",
-                                    div(class = "govuk-form-group",
-                                        tags$label(class = "govuk-label", `for` = "manual_vacancies_period", "Vacancies"),
-                                        selectInput("manual_vacancies_period", label = NULL, choices = c("Upload A01 first" = ""), selected = "")
-                                    ),
-                                    div(class = "govuk-form-group",
-                                        tags$label(class = "govuk-label", `for` = "manual_payroll_period", "Payroll employees"),
-                                        selectInput("manual_payroll_period", label = NULL, choices = c("Upload RTISA first" = ""), selected = "")
-                                    )
-                                ),
-                                
-                                tags$hr(class = "govuk-section-break"),
-                                
-                                h2(class = "govuk-heading-m", "Preview"),
-                                actionButton("manual_preview_dashboard", "Preview Dashboard", class = "govuk-button govuk-button--blue"),
-                                actionButton("manual_preview_topten", "Preview Top Ten Stats", class = "govuk-button govuk-button--blue"),
-                                
-                                tags$hr(class = "govuk-section-break"),
-                                
-                                h2(class = "govuk-heading-m", "Download"),
-                                downloadButton("manual_download_word", "Download Word", class = "govuk-button"),
-                                downloadButton("manual_download_excel", "Download Excel", class = "govuk-button govuk-button--secondary"),
-                                
-                                tags$hr(class = "govuk-section-break govuk-section-break--visible", style = "margin-top: 20px; margin-bottom: 15px;"),
-                                
-                                h2(class = "govuk-heading-s", "Supplementary files"),
-                                p(class = "govuk-body-s govuk-!-margin-bottom-2",
-                                  "Optional — for the full Excel audit workbook (CLA01, X02, OECD)."),
-                                
-                                fileInput("upload_extra_files", NULL,
-                                          accept = c(".xlsx", ".csv"), multiple = TRUE, width = "100%"),
-                                
-                                div(class = "govuk-hint govuk-body-s",
-                                    "Name files with their type prefix (e.g. cla01_feb2026.xlsx, x02_feb2026.xlsx,",
-                                    "oecd_unemployment.csv). OECD files can be .csv or .xlsx."),
-                                
-                                uiOutput("extra_upload_status")
+                                downloadButton("download_word", "Download Word", class = "govuk-button govuk-button--blue"),
+                                downloadButton("download_excel", "Download Excel", class = "govuk-button")
                             )
                         )
                     )
@@ -610,6 +586,14 @@ ui <- fluidPage(
                 div(class = "dashboard-card",
                     div(class = "dashboard-card__header", "Top Ten Statistics Preview"),
                     div(class = "dashboard-card__content", uiOutput("topten_preview"))
+                ),
+                div(class = "dashboard-card",
+                    div(class = "dashboard-card__header", "Summary Preview"),
+                    div(class = "dashboard-card__content", uiOutput("summary_preview"))
+                ),
+                div(class = "dashboard-card",
+                    div(class = "dashboard-card__header", "OECD International Comparisons"),
+                    div(class = "dashboard-card__content preview-scroll", uiOutput("oecd_preview"))
                 )
       )
   ),
@@ -834,112 +818,30 @@ server <- function(input, output, session) {
     }
   })
   
-  # handle supplementary file uploads (CLA01, X02, OECD)
-  observeEvent(input$upload_extra_files, {
-    files <- input$upload_extra_files
-    if (is.null(files)) return()
-    
-    detected_types <- character(0)
-    
-    for (i in seq_len(nrow(files))) {
-      ftype <- .detect_file_type(files$name[i], files$datapath[i])
-      if (is.null(ftype)) {
-        showNotification(
-          paste0("Could not identify file: ", files$name[i],
-                 ". OECD files are auto-detected by content; other files need ",
-                 "recognisable names (CLA01, X02, etc.)."),
-          type = "warning", duration = 10
-        )
-        next
-      }
-      
-      # store recognised types
-      if (ftype == "cla01") {
-        uploaded_files$cla01 <- files$datapath[i]
-      } else if (ftype == "x02") {
-        uploaded_files$x02 <- files$datapath[i]
-      } else if (ftype == "oecd_unemp") {
-        uploaded_files$oecd_unemp <- files$datapath[i]
-      } else if (ftype == "oecd_emp") {
-        uploaded_files$oecd_emp <- files$datapath[i]
-      } else if (ftype == "oecd_inact") {
-        uploaded_files$oecd_inact <- files$datapath[i]
-      } else {
-        # core files can also be uploaded via supplementary uploader
-        if (ftype == "a01") uploaded_files$a01 <- files$datapath[i]
-        if (ftype == "hr1") uploaded_files$hr1 <- files$datapath[i]
-        if (ftype == "x09") uploaded_files$x09 <- files$datapath[i]
-        if (ftype == "rtisa") uploaded_files$rtisa <- files$datapath[i]
-      }
-      
-      .oecd_friendly <- c(oecd_unemp = "OECD Unemployment Rate",
-                          oecd_emp = "OECD Employment Rate",
-                          oecd_inact = "OECD Inactivity Rate")
-      display <- if (ftype %in% names(.oecd_friendly)) .oecd_friendly[[ftype]] else toupper(ftype)
-      detected_types <- c(detected_types, display)
-    }
-    
-    if (length(detected_types) > 0) {
-      showNotification(
-        paste0("Detected: ", paste(detected_types, collapse = ", ")),
-        type = "message", duration = 5
-      )
-    }
-  })
-  
-  # upload status display — core files with detected month
+  # upload status display — all 9 file types
   output$upload_status <- renderUI({
-    core_files <- list(
-      A01   = uploaded_files$a01,
-      HR1   = uploaded_files$hr1,
-      X09   = uploaded_files$x09,
-      RTISA = uploaded_files$rtisa
+    all_files <- list(
+      A01 = uploaded_files$a01, HR1 = uploaded_files$hr1,
+      RTISA = uploaded_files$rtisa, X09 = uploaded_files$x09,
+      CLA01 = uploaded_files$cla01, X02 = uploaded_files$x02,
+      `OECD UE` = uploaded_files$oecd_unemp,
+      `OECD Emp` = uploaded_files$oecd_emp,
+      `OECD Inact` = uploaded_files$oecd_inact
     )
-    
-    n_up <- sum(!vapply(core_files, is.null, logical(1)))
-    if (n_up == 0) return(NULL)
-    
-    core_tags <- lapply(names(core_files), function(nm) {
-      if (!is.null(core_files[[nm]])) {
-        span(class = "govuk-tag govuk-tag--green", style = "margin-right: 4px;",
+    file_tags <- lapply(names(all_files), function(nm) {
+      if (!is.null(all_files[[nm]])) {
+        span(class = "govuk-tag govuk-tag--green", style = "margin: 2px;",
              paste0(nm, " \u2713"))
       } else {
-        span(class = "govuk-tag govuk-tag--grey", style = "margin-right: 4px;", nm)
+        span(class = "govuk-tag govuk-tag--grey", style = "margin: 2px;", nm)
       }
     })
-    
     mm <- reference_manual_month()
     month_line <- if (!is.null(mm) && nzchar(mm) && !is.null(uploaded_files$a01)) {
       div(style = "margin-top: 6px; font-weight: 600;",
           paste0("Reference month: ", manual_month_to_display(mm)))
     }
-    
-    div(style = "margin-top: 10px;",
-        tagList(core_tags),
-        month_line)
-  })
-  
-  # supplementary file status — shown below supplementary upload area
-  output$extra_upload_status <- renderUI({
-    extra_files <- list(
-      CLA01 = uploaded_files$cla01,
-      X02   = uploaded_files$x02,
-      `OECD Unemp` = uploaded_files$oecd_unemp,
-      `OECD Emp`   = uploaded_files$oecd_emp,
-      `OECD Inact` = uploaded_files$oecd_inact
-    )
-    
-    n_extra <- sum(!vapply(extra_files, is.null, logical(1)))
-    if (n_extra == 0) return(NULL)
-    
-    extra_tags <- lapply(names(extra_files), function(nm) {
-      if (!is.null(extra_files[[nm]])) {
-        span(class = "govuk-tag govuk-tag--blue", style = "margin-right: 4px;",
-             paste0(nm, " \u2713"))
-      }
-    })
-    
-    div(style = "margin-top: 6px;", tagList(extra_tags))
+    div(style = "margin-top: 10px;", tagList(file_tags), month_line)
   })
   
   # Detect vacancies periods from A01 and populate manual dropdown
@@ -989,16 +891,6 @@ server <- function(input, output, session) {
       
       manual_period_labels$vac_aligned <- lab_aligned
       manual_period_labels$vac_latest  <- lab_latest
-      
-      if (identical(lab_aligned, lab_latest)) {
-        choices <- setNames(lab_aligned, paste0(lab_aligned, " (only period)"))
-      } else {
-        choices <- setNames(
-          c(lab_aligned, lab_latest),
-          c(paste0(lab_aligned, " (default)"), lab_latest)
-        )
-      }
-      updateSelectInput(session, "manual_vacancies_period", choices = choices, selected = choices[1])
     }, error = function(e) NULL)
   })
   
@@ -1041,16 +933,6 @@ server <- function(input, output, session) {
       
       manual_period_labels$pay_aligned <- lab_aligned
       manual_period_labels$pay_latest  <- lab_latest
-      
-      if (identical(lab_aligned, lab_latest)) {
-        choices <- setNames(lab_latest, paste0(lab_latest, " (only period)"))
-      } else {
-        choices <- setNames(
-          c(lab_aligned, lab_latest),
-          c(paste0(lab_aligned, " (default)"), lab_latest)
-        )
-      }
-      updateSelectInput(session, "manual_payroll_period", choices = choices, selected = choices[1])
     }, error = function(e) NULL)
   })
   
@@ -1059,10 +941,46 @@ server <- function(input, output, session) {
     vac_aligned = NULL, vac_latest = NULL,
     pay_aligned = NULL, pay_latest = NULL
   )
+  selected_vac_period <- reactiveVal("aligned")
+  selected_pay_period <- reactiveVal("aligned")
   period_labels <- reactiveVal(list(
     vac = list(aligned = NULL, latest = NULL),
     payroll = list(aligned = NULL, latest = NULL)
   ))
+
+  # period toggle button UIs
+  output$manual_vac_period_buttons <- renderUI({
+    aligned <- manual_period_labels$vac_aligned
+    latest  <- manual_period_labels$vac_latest
+    if (is.null(aligned) || !nzchar(aligned)) return(p(class = "govuk-hint", "Upload A01 first"))
+    sel <- selected_vac_period()
+    div(class = "period-toggle-group",
+      actionButton("vac_period_aligned", aligned,
+                   class = paste("govuk-button", if (sel == "aligned") "active" else "")),
+      if (!identical(aligned, latest))
+        actionButton("vac_period_latest", latest,
+                     class = paste("govuk-button", if (sel == "latest") "active" else ""))
+    )
+  })
+
+  output$manual_pay_period_buttons <- renderUI({
+    aligned <- manual_period_labels$pay_aligned
+    latest  <- manual_period_labels$pay_latest
+    if (is.null(aligned) || !nzchar(aligned)) return(p(class = "govuk-hint", "Upload RTISA first"))
+    sel <- selected_pay_period()
+    div(class = "period-toggle-group",
+      actionButton("pay_period_aligned", aligned,
+                   class = paste("govuk-button", if (sel == "aligned") "active" else "")),
+      if (!identical(aligned, latest))
+        actionButton("pay_period_latest", latest,
+                     class = paste("govuk-button", if (sel == "latest") "active" else ""))
+    )
+  })
+
+  observeEvent(input$vac_period_aligned, { selected_vac_period("aligned") })
+  observeEvent(input$vac_period_latest,  { selected_vac_period("latest") })
+  observeEvent(input$pay_period_aligned, { selected_pay_period("aligned") })
+  observeEvent(input$pay_period_latest,  { selected_pay_period("latest") })
   
   # small date helpers (no extra packages)
   add_months <- function(d, n) {
@@ -1110,6 +1028,16 @@ server <- function(input, output, session) {
     d <- parse_lfs_end(label)
     if (is.na(d)) return(NULL)
     d
+  }
+
+  # Resolve selected period label from toggle buttons
+  .selected_vac_label <- function() {
+    if (selected_vac_period() == "latest") manual_period_labels$vac_latest
+    else manual_period_labels$vac_aligned
+  }
+  .selected_pay_label <- function() {
+    if (selected_pay_period() == "latest") manual_period_labels$pay_latest
+    else manual_period_labels$pay_aligned
   }
   
   # Update reference month  from auto-detected value
@@ -1634,8 +1562,8 @@ server <- function(input, output, session) {
         manual_month = NULL,
         file_a01 = uploaded_files$a01, file_hr1 = uploaded_files$hr1,
         file_x09 = uploaded_files$x09, file_rtisa = uploaded_files$rtisa,
-        vac_end_override = .parse_period_end(input$manual_vacancies_period),
-        payroll_end_override = .parse_period_end(input$manual_payroll_period),
+        vac_end_override = .parse_period_end(.selected_vac_label()),
+        payroll_end_override = .parse_period_end(.selected_pay_label()),
         target_env = calc_env
       )
       .update_ref_month(detected_mm)
@@ -1688,7 +1616,7 @@ server <- function(input, output, session) {
         manual_month = NULL,
         file_a01 = uploaded_files$a01, file_hr1 = uploaded_files$hr1,
         file_x09 = uploaded_files$x09, file_rtisa = uploaded_files$rtisa,
-        payroll_end_override = .parse_period_end(input$manual_payroll_period),
+        payroll_end_override = .parse_period_end(.selected_pay_label()),
         target_env = globalenv()
       )
       manual_month <<- detected_mm
@@ -1711,7 +1639,87 @@ server <- function(input, output, session) {
     
     showNotification("Top Ten loaded (Manual Upload)", type = "message", duration = 3)
   })
-  
+
+  # manual preview: summary
+  summary_data <- reactiveVal(NULL)
+
+  observeEvent(input$manual_preview_summary, {
+    if (!.check_manual_ready()) return()
+
+    withProgress(message = "Generating Summary", value = 0, {
+      incProgress(0.2, detail = "Running calculations...")
+
+      source("utils/helpers.R", local = FALSE)
+      source(excel_calc_path, local = FALSE)
+      if (file.exists(config_path)) source(config_path, local = FALSE)
+
+      pay_label <- .selected_pay_label()
+      detected_mm <- run_calculations_from_excel(
+        manual_month = NULL,
+        file_a01 = uploaded_files$a01, file_hr1 = uploaded_files$hr1,
+        file_x09 = uploaded_files$x09, file_rtisa = uploaded_files$rtisa,
+        payroll_end_override = .parse_period_end(pay_label),
+        target_env = globalenv()
+      )
+      manual_month <<- detected_mm
+      .update_ref_month(detected_mm)
+
+      incProgress(0.5, detail = "Generating narrative...")
+      source(summary_path, local = FALSE)
+
+      result <- tryCatch(generate_summary(), error = function(e) {
+        showNotification(paste("Summary error:", e$message), type = "error")
+        NULL
+      })
+      if (!is.null(result)) summary_data(result)
+      incProgress(0.3, detail = "Done")
+    })
+
+    showNotification("Summary generated (Manual Upload)", type = "message", duration = 3)
+  })
+
+  # manual preview: OECD
+  oecd_preview_data <- reactiveVal(NULL)
+
+  observeEvent(input$manual_preview_oecd, {
+    files <- list(
+      Unemployment = uploaded_files$oecd_unemp,
+      Employment   = uploaded_files$oecd_emp,
+      Inactivity   = uploaded_files$oecd_inact
+    )
+    available <- Filter(Negate(is.null), files)
+    if (length(available) == 0) {
+      showNotification("Upload at least one OECD file first", type = "warning")
+      return()
+    }
+
+    withProgress(message = "Loading OECD Data", value = 0, {
+      tables <- list()
+      for (nm in names(available)) {
+        incProgress(1 / length(available), detail = nm)
+        path <- available[[nm]]
+        ext <- tolower(tools::file_ext(path))
+        tbl <- tryCatch({
+          if (ext == "csv") {
+            raw <- read.csv(path, stringsAsFactors = FALSE)
+            if (all(c("REF_AREA", "TIME_PERIOD", "OBS_VALUE") %in% names(raw))) {
+              tidyr::pivot_wider(raw[, c("REF_AREA", "TIME_PERIOD", "OBS_VALUE")],
+                                 names_from = TIME_PERIOD, values_from = OBS_VALUE)
+            } else raw
+          } else {
+            sheets <- readxl::excel_sheets(path)
+            tbl_sheet <- if ("Table" %in% sheets) "Table" else sheets[1]
+            as.data.frame(readxl::read_excel(path, sheet = tbl_sheet))
+          }
+        }, error = function(e) data.frame(Error = e$message))
+        tables[[nm]] <- tbl
+      }
+      oecd_preview_data(tables)
+    })
+
+    showNotification("OECD data loaded", type = "message", duration = 3)
+  })
+
   # manual download: word
   output$manual_download_word <- downloadHandler(
     filename = function() {
@@ -1743,7 +1751,7 @@ server <- function(input, output, session) {
             manual_month = NULL,
             file_a01 = uploaded_files$a01, file_hr1 = uploaded_files$hr1,
             file_x09 = uploaded_files$x09, file_rtisa = uploaded_files$rtisa,
-            payroll_end_override = .parse_period_end(input$manual_payroll_period),
+            payroll_end_override = .parse_period_end(.selected_pay_label()),
             target_env = globalenv()
           )
           manual_month <<- detected_mm
@@ -1775,8 +1783,8 @@ server <- function(input, output, session) {
               file_oecd_unemp = uploaded_files$oecd_unemp,
               file_oecd_emp   = uploaded_files$oecd_emp,
               file_oecd_inact = uploaded_files$oecd_inact,
-              vac_end_override = .parse_period_end(input$manual_vacancies_period),
-              payroll_end_override = .parse_period_end(input$manual_payroll_period),
+              vac_end_override = .parse_period_end(.selected_vac_label()),
+              payroll_end_override = .parse_period_end(.selected_pay_label()),
               summary_override = summary_lines,
               top_ten_override = top10_lines,
               template_path = manual_template,
@@ -1848,7 +1856,7 @@ server <- function(input, output, session) {
             manual_month = NULL,
             file_a01 = uploaded_files$a01, file_hr1 = uploaded_files$hr1,
             file_x09 = uploaded_files$x09, file_rtisa = uploaded_files$rtisa,
-            payroll_end_override = .parse_period_end(input$manual_payroll_period),
+            payroll_end_override = .parse_period_end(.selected_pay_label()),
             target_env = globalenv()
           )
           manual_month <<- detected_mm
@@ -1980,6 +1988,44 @@ server <- function(input, output, session) {
     })
     
     tags$ol(class = "top-ten-list", items)
+  })
+
+  # render: summary preview
+
+  output$summary_preview <- renderUI({
+    summ <- summary_data()
+    if (is.null(summ)) {
+      return(p(class = "govuk-body", "Click 'Summary' to generate the narrative."))
+    }
+    items <- lapply(1:10, function(i) {
+      txt <- summ[[paste0("line", i)]]
+      if (is.null(txt) || txt == "") txt <- "(Data not available)"
+      tags$li(txt)
+    })
+    tags$ol(class = "top-ten-list", items)
+  })
+
+  # render: OECD preview
+
+  output$oecd_preview <- renderUI({
+    tables <- oecd_preview_data()
+    if (is.null(tables)) {
+      return(p(class = "govuk-body", "Click 'OECD' to preview uploaded international data."))
+    }
+    blocks <- lapply(names(tables), function(nm) {
+      tbl <- tables[[nm]]
+      if (nrow(tbl) > 20) tbl <- tbl[1:20, ]
+      header <- tags$tr(lapply(names(tbl), tags$th))
+      rows <- lapply(seq_len(nrow(tbl)), function(i) {
+        tags$tr(lapply(as.character(tbl[i, ]), tags$td))
+      })
+      tagList(
+        h3(class = "govuk-heading-s", nm),
+        div(style = "overflow-x: auto; margin-bottom: 20px;",
+            tags$table(class = "stats-table", tags$thead(header), tags$tbody(rows)))
+      )
+    })
+    tagList(blocks)
   })
 }
 
