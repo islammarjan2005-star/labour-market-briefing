@@ -500,13 +500,6 @@ ui <- fluidPage(
                                         "Drag or select files. Auto-detected by name: A01, HR1, X09, RTISA, CLA01, X02, OECD.")
                                 ),
 
-                                # --- ONS download link ---
-                                div(class = "govuk-form-group", style = "margin-top: -10px;",
-                                    tags$a(href = "https://www.ons.gov.uk/file?uri=/employmentandlabourmarket/peopleinwork/employmentandemployeetypes/datasets/summaryoflabourmarketstatistics/current/a01.xlsx",
-                                           class = "govuk-link", target = "_blank",
-                                           "Download A01 from ONS")
-                                ),
-
                                 # --- File status (all 9 types) ---
                                 uiOutput("upload_status"),
 
@@ -826,6 +819,13 @@ server <- function(input, output, session) {
   })
 
   # upload status display — all 9 file types
+  # ONS download URLs for files that can be fetched directly
+  ons_download_urls <- list(
+    A01   = "https://www.ons.gov.uk/file?uri=/employmentandlabourmarket/peopleinwork/employmentandemployeetypes/datasets/summaryoflabourmarketstatistics/current/a01.xlsx",
+    X09   = "https://www.ons.gov.uk/file?uri=/employmentandlabourmarket/peopleinwork/earningsandworkinghours/datasets/averageweeklyearningsearn01/current/x09.xlsx",
+    RTISA = "https://www.ons.gov.uk/file?uri=/employmentandlabourmarket/peopleinwork/earningsandworkinghours/datasets/realtimeinformationstatisticsreferencetableseasonallyadjusted/current/rtisa.xlsx"
+  )
+
   output$upload_status <- renderUI({
     all_files <- list(
       A01 = uploaded_files$a01, HR1 = uploaded_files$hr1,
@@ -839,6 +839,10 @@ server <- function(input, output, session) {
       if (!is.null(all_files[[nm]])) {
         span(class = "govuk-tag govuk-tag--green", style = "margin: 2px;",
              paste0(nm, " \u2713"))
+      } else if (nm %in% names(ons_download_urls)) {
+        tags$a(href = ons_download_urls[[nm]], target = "_blank",
+               style = "text-decoration: none;",
+               span(class = "govuk-tag govuk-tag--grey", style = "margin: 2px; cursor: pointer;", nm))
       } else {
         span(class = "govuk-tag govuk-tag--grey", style = "margin: 2px;", nm)
       }
