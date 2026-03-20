@@ -137,31 +137,6 @@ sv <- function(name, default = NA_real_) {
   if (exists(name, inherits = TRUE)) get(name, inherits = TRUE) else default
 }
 
-# Insert a line break + subtitle text below a row label in the Word table
-.add_period_subtitle <- function(doc, search_text, subtitle_text) {
-  if (is.null(subtitle_text) || !nzchar(subtitle_text)) return(doc)
-  body_xml <- doc$doc_obj$get()
-  ns <- xml2::xml_ns(body_xml)
-  w_ns <- "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
-  text_nodes <- xml2::xml_find_all(body_xml, ".//w:t", ns = ns)
-  for (node in text_nodes) {
-    txt <- xml2::xml_text(node)
-    if (grepl(search_text, txt, fixed = TRUE)) {
-      run_node <- xml2::xml_parent(node)
-      # Add line break + subtitle text as parsed XML fragments
-      br_frag <- xml2::read_xml(paste0('<w:br xmlns:w="', w_ns, '"/>'))
-      xml2::xml_add_child(run_node, br_frag)
-      t_frag <- xml2::read_xml(sprintf(
-        '<w:t xmlns:w="%s" xml:space="preserve">%s</w:t>',
-        w_ns, subtitle_text
-      ))
-      xml2::xml_add_child(run_node, t_frag)
-      break
-    }
-  }
-  doc
-}
-
 # OECD data
 
 # target countries
@@ -384,7 +359,9 @@ generate_manual_word_output <- function(
   doc <- replace_all(doc, "qvzlfsperiod",  sv("lfs_period_label", ""))
   doc <- replace_all(doc, "qvzlfsquarter", sv("lfs_period_short_label", ""))
   doc <- replace_all(doc, "qvzvacquarter", sv("vacancies_period_short_label", ""))
-  
+  doc <- replace_all(doc, "qvzvacperiod",  sv("vacancies_period_short_label", ""))
+  doc <- replace_all(doc, "qvzpayperiod",  sv("payroll_period_short_label", ""))
+
   # -summary + top ten lines
   for (i in 1:10) doc <- replace_all(doc, sprintf("qvzsl%02d", i), summary[[paste0("line", i)]])
   for (i in 1:10) doc <- replace_all(doc, sprintf("qvztt%02d", i), top10[[paste0("line", i)]])
@@ -460,12 +437,6 @@ generate_manual_word_output <- function(
   doc <- fill_conditional(doc, "qvzwnode",  .format_gbp_signed0(sv("wages_change_election")),     sv("wages_change_election"))
   doc <- fill_conditional(doc, "qvzwcpde",  .format_gbp_signed0(sv("wages_cpi_change_election")), sv("wages_cpi_change_election"))
   
-  # Add period subtitles under Vacancies and Payroll row labels
-  vac_period <- sv("vacancies_period_short_label", "")
-  pay_period <- sv("payroll_period_short_label", "")
-  if (nzchar(vac_period)) doc <- .add_period_subtitle(doc, "Vacancies", paste0("3-month avg. (", vac_period, ")"))
-  if (nzchar(pay_period)) doc <- .add_period_subtitle(doc, "Payroll", paste0("3-month avg. (", pay_period, ")"))
-
   # The OECD page is already in ManualDB.docx
   oecd_unemp_data <- tryCatch(.read_oecd_latest(file_oecd_unemp), error = function(e) NULL)
   oecd_emp_data   <- tryCatch(.read_oecd_latest(file_oecd_emp),   error = function(e) NULL)

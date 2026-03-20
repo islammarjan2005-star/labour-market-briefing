@@ -108,31 +108,6 @@ replace_all <- function(doc, key, val) {
   doc
 }
 
-# Insert a line break + subtitle text below a row label in the Word table
-.add_period_subtitle <- function(doc, search_text, subtitle_text) {
-  if (is.null(subtitle_text) || !nzchar(subtitle_text)) return(doc)
-  body_xml <- doc$doc_obj$get()
-  ns <- xml2::xml_ns(body_xml)
-  w_ns <- "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
-  text_nodes <- xml2::xml_find_all(body_xml, ".//w:t", ns = ns)
-  for (node in text_nodes) {
-    txt <- xml2::xml_text(node)
-    if (grepl(search_text, txt, fixed = TRUE)) {
-      run_node <- xml2::xml_parent(node)
-      # Add line break + subtitle text as parsed XML fragments
-      br_frag <- xml2::read_xml(paste0('<w:br xmlns:w="', w_ns, '"/>'))
-      xml2::xml_add_child(run_node, br_frag)
-      t_frag <- xml2::read_xml(sprintf(
-        '<w:t xmlns:w="%s" xml:space="preserve">%s</w:t>',
-        w_ns, subtitle_text
-      ))
-      xml2::xml_add_child(run_node, t_frag)
-      break
-    }
-  }
-  doc
-}
-
 fill_conditional <- function(doc, base, value_text, value_num, invert = FALSE, neutral = FALSE) {
   value_num <- suppressWarnings(as.numeric(value_num))
   if (is.na(value_num)) value_num <- 0
@@ -240,6 +215,8 @@ generate_word_output <- function(template_path = "utils/DB.docx",
   if (exists("lfs_period_label", inherits = TRUE)) doc <- replace_all(doc, "LMB__LFS_PERIOD", lfs_period_label)
   if (exists("lfs_period_short_label", inherits = TRUE)) doc <- replace_all(doc, "LMB__LFS_QUARTER", lfs_period_short_label)
   if (exists("vacancies_period_short_label", inherits = TRUE)) doc <- replace_all(doc, "LMB__VAC_QUARTER", vacancies_period_short_label)
+  if (exists("vacancies_period_short_label", inherits = TRUE)) doc <- replace_all(doc, "LMB__VAC_PERIOD", vacancies_period_short_label)
+  if (exists("payroll_period_short_label", inherits = TRUE)) doc <- replace_all(doc, "LMB__PAY_PERIOD", payroll_period_short_label)
 
   for (i in 1:10) doc <- replace_all(doc, sprintf("LMB__SL%02d", i), summary[[paste0("line", i)]])
   for (i in 1:10) doc <- replace_all(doc, sprintf("LMB__TT%02d", i), top10[[paste0("line", i)]])
@@ -336,12 +313,6 @@ generate_word_output <- function(template_path = "utils/DB.docx",
       doc <- fill_conditional(doc, "LMB__WAGECPI_DE", .format_gbp_signed0(wages_cpi_change_election), wages_cpi_change_election, invert = FALSE)
     }
   }
-
-  # Add period subtitles under Vacancies and Payroll row labels
-  vac_period <- if (exists("vacancies_period_short_label", inherits = TRUE)) vacancies_period_short_label else ""
-  pay_period <- if (exists("payroll_period_short_label", inherits = TRUE)) payroll_period_short_label else ""
-  if (nzchar(vac_period)) doc <- .add_period_subtitle(doc, "Vacancies", paste0("3-month avg. (", vac_period, ")"))
-  if (nzchar(pay_period)) doc <- .add_period_subtitle(doc, "Payroll", paste0("3-month avg. (", pay_period, ")"))
 
   # workforce jobs
   wfj_period <- if (exists("workforce_jobs", inherits = TRUE)) workforce_jobs$period else ""
