@@ -500,6 +500,14 @@ ui <- fluidPage(
                                         "Drag or select files. Auto-detected by name: A01, HR1, X09, RTISA, CLA01, X02, OECD.")
                                 ),
 
+                                # --- Fetch from ONS ---
+                                div(class = "govuk-form-group", style = "margin-top: -10px;",
+                                    actionButton("fetch_ons", "Fetch latest from ONS",
+                                                 class = "govuk-button govuk-button--blue"),
+                                    div(class = "govuk-hint",
+                                        "Downloads A01, X09 and RTISA directly from ONS. HR1 must still be uploaded manually.")
+                                ),
+
                                 # --- File status (all 9 types) ---
                                 uiOutput("upload_status"),
 
@@ -648,7 +656,14 @@ server <- function(input, output, session) {
     oecd_emp = NULL,
     oecd_inact = NULL
   )
-  
+
+  # ONS direct download URLs (the /current/ path always points to the latest release)
+  ons_urls <- list(
+    a01   = "https://www.ons.gov.uk/file?uri=/employmentandlabourmarket/peopleinwork/employmentandemployeetypes/datasets/summaryoflabourmarketstatistics/current/a01.xlsx",
+    x09   = "https://www.ons.gov.uk/file?uri=/employmentandlabourmarket/peopleinwork/earningsandworkinghours/datasets/averageweeklyearningsearn01/current/x09.xlsx",
+    rtisa = "https://www.ons.gov.uk/file?uri=/employmentandlabourmarket/peopleinwork/earningsandworkinghours/datasets/realtimeinformationstatisticsreferencetableseasonallyadjusted/current/rtisa.xlsx"
+  )
+
   # Validate Excel sheets on upload and warn if wrong file
   .validate_excel <- function(path, expected_sheets, file_label) {
     sheets <- tryCatch(readxl::excel_sheets(path), error = function(e) character(0))
@@ -817,7 +832,63 @@ server <- function(input, output, session) {
       )
     }
   })
-  
+
+  # fetch files directly from ONS website
+  observeEvent(input$fetch_ons, {
+    withProgress(message = "Fetching from ONS", value = 0, {
+      results <- character(0)
+      datasets <- names(ons_urls)
+
+      for (i in seq_along(datasets)) {
+        ds <- datasets[i]
+        url <- ons_urls[[ds]]
+        label <- toupper(ds)
+        incProgress(1 / length(datasets), detail = paste0("Downloading ", label, "..."))
+
+        tmp <- tempfile(fileext = ".xlsx")
+        dl_ok <- tryCatch({
+          download.file(url, tmp, mode = "wb", quiet = TRUE)
+          TRUE
+        }, error = function(e) {
+          showNotification(paste0("Failed to download ", label, ": ", e$message),
+                           type = "error", duration = 10)
+          FALSE
+        })
+        if (!dl_ok) next
+
+        # reuse existing detection to confirm we got the right file
+        ftype <- .detect_file_type(paste0(ds, ".xlsx"), tmp)
+        if (is.null(ftype)) {
+          showNotification(paste0("Downloaded ", label, " but could not identify it. ONS URL may have changed."),
+                           type = "warning", duration = 10)
+          next
+        }
+
+        # validate and store — same logic as the manual upload handler
+        if (ftype == "a01") {
+          .validate_excel(tmp, c("1", "10", "13", "15", "19"), "A01")
+          uploaded_files$a01 <- tmp
+          tryCatch({
+            detected <- .detect_manual_month_from_a01(tmp)
+            if (!is.null(detected)) .update_ref_month(detected)
+          }, error = function(e) NULL)
+        } else if (ftype == "x09") {
+          .validate_excel(tmp, c("AWE Real_CPI"), "X09")
+          uploaded_files$x09 <- tmp
+        } else if (ftype == "rtisa") {
+          .validate_excel(tmp, c("1. Payrolled employees (UK)", "23. Employees (Industry)"), "RTISA")
+          uploaded_files$rtisa <- tmp
+        }
+        results <- c(results, label)
+      }
+    })
+
+    if (length(results) > 0) {
+      showNotification(paste0("Fetched from ONS: ", paste(results, collapse = ", ")),
+                       type = "message", duration = 5)
+    }
+  })
+
   # upload status display — all 9 file types
   output$upload_status <- renderUI({
     all_files <- list(
