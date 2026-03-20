@@ -493,6 +493,8 @@ run_calculations_from_excel <- function(manual_month = NULL,
     .read_sheet(file_rtisa, "1. Payrolled employees (UK)")
   } else data.frame()
 
+  rtisa_latest <- anchor_m  # default; overridden below if RTISA data available
+
   if (nrow(rtisa_pay) > 0 && ncol(rtisa_pay) >= 2) {
     # Parse text dates like "January 2026"
     rtisa_text <- trimws(as.character(rtisa_pay[[1]]))
@@ -673,8 +675,8 @@ run_calculations_from_excel <- function(manual_month = NULL,
   assign("vacancies_period_label",       vacancies_period_label,       envir = target_env)
   assign("vacancies_period_short_label", vacancies_period_short_label, envir = target_env)
   assign("payroll_flash_label",          payroll_flash_label_val,      envir = target_env)
-  assign("payroll_month_label",          format(anchor_m, "%B %Y"),    envir = target_env)
-  assign("payroll_period_short_label",  make_lfs_label(anchor_m),     envir = target_env)
+  assign("payroll_month_label",          format(rtisa_latest, "%B %Y"),    envir = target_env)
+  assign("payroll_period_short_label",  make_lfs_label(rtisa_latest),     envir = target_env)
   assign("hr1_month_label",             hr1_month_label,              envir = target_env)
   assign("sector_month_label",          sector_month_label,           envir = target_env)
   assign("manual_month",                manual_month,                 envir = target_env)
