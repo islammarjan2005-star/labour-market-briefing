@@ -70,7 +70,7 @@ library(lubridate)
   lfs_hits <- grep(lfs_pattern, trimws(col1))
 
   if (length(lfs_hits) >= 5) {
-    dates <- vapply(trimws(col1[lfs_hits]), .nc_parse_lfs_label, as.Date(NA))
+    dates <- as.Date(sapply(trimws(col1[lfs_hits]), .nc_parse_lfs_label), origin = "1970-01-01")
     valid <- which(!is.na(dates))
     if (length(valid) < 6) return(NULL)  # need decent history
     ord <- order(dates[valid])
