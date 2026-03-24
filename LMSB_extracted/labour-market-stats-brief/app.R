@@ -524,6 +524,7 @@ ui <- fluidPage(
                                 actionButton("manual_preview_topten", "Top Ten", class = "govuk-button govuk-button--blue"),
                                 actionButton("manual_preview_summary", "Summary", class = "govuk-button govuk-button--blue"),
                                 actionButton("manual_preview_oecd", "OECD", class = "govuk-button govuk-button--blue"),
+                                actionButton("manual_preview_notable", "Notable Changes", class = "govuk-button govuk-button--secondary"),
 
                                 tags$hr(class = "govuk-section-break"),
 
@@ -580,6 +581,10 @@ ui <- fluidPage(
   div(class = "govuk-width-container govuk-width-container--wide",
       tags$main(class = "govuk-main-wrapper", style = "padding-top: 0;",
                 div(class = "dashboard-card",
+                    div(class = "dashboard-card__header", "Notable Changes"),
+                    div(class = "dashboard-card__content preview-scroll", uiOutput("notable_preview"))
+                ),
+                div(class = "dashboard-card",
                     div(class = "dashboard-card__header", "Dashboard Preview"),
                     div(class = "dashboard-card__content preview-scroll", uiOutput("dashboard_preview"))
                 ),
@@ -635,6 +640,7 @@ server <- function(input, output, session) {
   # reactive values
   dashboard_data <- reactiveVal(NULL)
   topten_data <- reactiveVal(NULL)
+  notable_data <- reactiveVal(NULL)
   
   # uploaded file paths (NULL = not uploaded, use DB)
   uploaded_files <- reactiveValues(
@@ -1731,6 +1737,39 @@ server <- function(input, output, session) {
     showNotification("OECD data loaded", type = "message", duration = 3)
   })
 
+  # manual preview: notable changes (scans every sheet + column in uploaded files)
+  observeEvent(input$manual_preview_notable, {
+    has_any <- !is.null(uploaded_files$a01) || !is.null(uploaded_files$hr1) ||
+               !is.null(uploaded_files$x09) || !is.null(uploaded_files$rtisa)
+    if (!has_any) {
+      showNotification("Upload at least one core file (A01, HR1, X09, or RTISA) first.",
+                       type = "warning", duration = 5)
+      return()
+    }
+
+    withProgress(message = "Scanning all Excel files for notable changes...", value = 0, {
+      source("utils/notable_changes.R", local = TRUE)
+      incProgress(0.1, detail = "Reading sheets...")
+      items <- tryCatch(
+        generate_notable_changes(
+          file_a01  = uploaded_files$a01,
+          file_hr1  = uploaded_files$hr1,
+          file_x09  = uploaded_files$x09,
+          file_rtisa = uploaded_files$rtisa
+        ),
+        error = function(e) {
+          showNotification(paste0("Error scanning files: ", e$message),
+                           type = "error", duration = 10)
+          character(0)
+        }
+      )
+      incProgress(0.9, detail = "Done")
+      notable_data(items)
+    })
+
+    showNotification("Notable changes scan complete", type = "message", duration = 3)
+  })
+
   # manual download: word
   output$manual_download_word <- downloadHandler(
     filename = function() {
@@ -2014,6 +2053,18 @@ server <- function(input, output, session) {
       tags$li(txt)
     })
     tags$ol(class = "top-ten-list", items)
+  })
+
+  # render: notable changes preview
+  output$notable_preview <- renderUI({
+    items <- notable_data()
+    if (is.null(items) || length(items) == 0) {
+      return(p(class = "govuk-body",
+               "Click 'Notable Changes' to scan all uploaded files for unusual movements."))
+    }
+    tags$ol(class = "govuk-list govuk-list--number",
+            style = "font-size: 14px; line-height: 1.6;",
+            lapply(items, function(txt) tags$li(txt)))
   })
 
   # render: OECD preview
